@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TeamFlow — Task Management</title>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -814,16 +815,16 @@ html[data-theme="light"] .ml-totals{background:#ffffff;border-top-color:#e4e8f0}
     </div>
     <div class="login-title">Welcome back</div>
     <div class="login-subtitle">Sign in to your workspace</div>
-    <div class="login-error" id="login-error">Invalid username or password.</div>
+    <div class="login-error" id="login-error">Invalid email or password.</div>
     <div class="form-group">
-      <label class="form-label">Username</label>
-      <input class="form-input" type="text" id="lu" placeholder="Enter username" autocomplete="username">
+      <label class="form-label">Email</label>
+      <input class="form-input" type="email" id="lu" placeholder="Enter email" autocomplete="email">
     </div>
     <div class="form-group">
       <label class="form-label">Password</label>
       <input class="form-input" type="password" id="lp" placeholder="Enter password" autocomplete="current-password">
     </div>
-    <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+    <button class="btn btn-primary" id="login-btn" onclick="doLogin()">Sign In</button>
     <div class="demo-box">
       <div class="demo-box-label">Team members — click to fill</div>
       <div class="demo-grid" id="login-user-chips"></div>
@@ -881,6 +882,33 @@ html[data-theme="light"] .ml-totals{background:#ffffff;border-top-color:#e4e8f0}
 <div class="toast" id="toast"></div>
 
 <script>
+// ===== SUPABASE =====
+const SUPABASE_URL = 'https://pwhrtvfzeoahqpdjyssg.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB3aHJ0dmZ6ZW9haHFwZGp5c3NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2ODI2MTAsImV4cCI6MjA5MTI1ODYxMH0.LwDdl0w6ArOZ3QDdMyxp-uH383Lvxahubxfu8T_-IDs';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ===== CASE CONVERSION =====
+function snakeToCamel(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(snakeToCamel);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const ck = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[ck] = v;
+  }
+  return out;
+}
+function camelToSnake(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(camelToSnake);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const sk = k.replace(/[A-Z]/g, c => '_' + c.toLowerCase());
+    out[sk] = v;
+  }
+  return out;
+}
+
 // ===== SEED DATA =====
 const TODAY = new Date('2026-03-22T12:00:00Z');
 
@@ -943,26 +971,104 @@ const SEED_CHATS={
   ],
 };
 
-// ===== STORAGE (safe localStorage wrapper) =====
+// ===== STORAGE (Supabase-backed with in-memory cache) =====
 let _memUsers=null,_memTasks=null;
+let _memClients=null,_memJobBags=null,_memTimeLogs=null;
+let _memNotifs=null;
+let _supabaseOk=false;
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function getUsers(){if(_memUsers)return _memUsers;const s=lsGet('tf_u');_memUsers=s?JSON.parse(s):[...SEED_USERS.map(u=>({...u}))];return _memUsers}
-function getTasks(){if(_memTasks)return _memTasks;const s=lsGet('tf_t');_memTasks=s?JSON.parse(s):[...SEED_TASKS.map(t=>({...t}))];return _memTasks}
-function saveUsers(u){_memUsers=u;lsSet('tf_u',JSON.stringify(u))}
-function saveTasks(t){_memTasks=t;lsSet('tf_t',JSON.stringify(t))}
 
-let _memClients=null,_memJobBags=null,_memTimeLogs=null;
-function getClients(){if(_memClients)return _memClients;const s=lsGet('tf_clients');_memClients=s?JSON.parse(s):[...SEED_CLIENTS.map(c=>({...c}))];return _memClients}
-function getJobBags(){if(_memJobBags)return _memJobBags;const s=lsGet('tf_jb');_memJobBags=s?JSON.parse(s):[...SEED_JOBBAGS.map(j=>({...j}))];return _memJobBags}
-function getTimeLogs(){if(_memTimeLogs)return _memTimeLogs;const s=lsGet('tf_tl');_memTimeLogs=s?JSON.parse(s):[...SEED_TIMELOGS.map(l=>({...l}))];return _memTimeLogs}
-function getChatMsgs(jbId){const s=lsGet('tf_chat_'+jbId);if(s)return JSON.parse(s);return(SEED_CHATS[jbId]||[]).map(m=>({...m}))}
-function saveClients(c){_memClients=c;lsSet('tf_clients',JSON.stringify(c))}
-function saveJobBags(j){_memJobBags=j;lsSet('tf_jb',JSON.stringify(j))}
-function saveTimeLogs(l){_memTimeLogs=l;lsSet('tf_tl',JSON.stringify(l))}
-function saveChatMsgs(jbId,msgs){lsSet('tf_chat_'+jbId,JSON.stringify(msgs))}
+// Synchronous getters — return from cache (populated by fetchAllData)
+function getUsers(){return _memUsers||[]}
+function getTasks(){return _memTasks||[]}
+function getClients(){return _memClients||[]}
+function getJobBags(){return _memJobBags||[]}
+function getTimeLogs(){return _memTimeLogs||[]}
+function getChatMsgs(jbId){return _memChatMsgs[jbId]||[]}
 
-function init(){getUsers();getTasks();getClients();getJobBags();getTimeLogs();initTheme()}
+let _memChatMsgs={};
+
+// Fetch all data from Supabase into caches
+async function fetchAllData(){
+  try{
+    const [users,tasks,clients,jobBags,timeLogs,jbFiles]=await Promise.all([
+      sb.from('profiles').select('*').order('created_at'),
+      sb.from('tasks').select('*').order('created_at'),
+      sb.from('clients').select('*').order('created_at'),
+      sb.from('job_bags').select('*').order('created_at'),
+      sb.from('time_logs').select('*').order('date'),
+      sb.from('job_bag_files').select('*').order('created_at'),
+    ]);
+    if(users.error)throw users.error;
+    _memUsers=(users.data||[]).map(snakeToCamel);
+    _memTasks=(tasks.data||[]).map(snakeToCamel);
+    _memClients=(clients.data||[]).map(snakeToCamel);
+    _memJobBags=(jobBags.data||[]).map(snakeToCamel);
+    _memTimeLogs=(timeLogs.data||[]).map(snakeToCamel);
+    // Attach files to job bags
+    const filesMap={};
+    (jbFiles.data||[]).forEach(f=>{
+      const cf=snakeToCamel(f);
+      if(!filesMap[cf.jobBagId])filesMap[cf.jobBagId]=[];
+      filesMap[cf.jobBagId].push({name:cf.name,type:cf.type,size:cf.size,url:cf.url,data:cf.url,storagePath:cf.storagePath});
+    });
+    _memJobBags.forEach(jb=>{jb.files=filesMap[jb.id]||jb.files||[];});
+    _supabaseOk=true;
+  }catch(err){
+    console.error('Supabase fetch failed, falling back to seeds:',err);
+    _supabaseOk=false;
+    _memUsers=[...SEED_USERS.map(u=>({...u}))];
+    _memTasks=[...SEED_TASKS.map(t=>({...t}))];
+    _memClients=[...SEED_CLIENTS.map(c=>({...c}))];
+    _memJobBags=[...SEED_JOBBAGS.map(j=>({...j}))];
+    _memTimeLogs=[...SEED_TIMELOGS.map(l=>({...l}))];
+  }
+}
+
+// Write-through save functions — update cache and persist to Supabase
+async function saveUsers(u){_memUsers=u;}
+async function saveTasks(t){_memTasks=t;}
+async function saveClients(c){_memClients=c;}
+async function saveJobBags(j){_memJobBags=j;}
+async function saveTimeLogs(l){_memTimeLogs=l;}
+function saveChatMsgs(jbId,msgs){_memChatMsgs[jbId]=msgs;}
+
+// Supabase upsert helpers
+async function sbUpsert(table,record){
+  const snake=camelToSnake(record);
+  const{error}=await sb.from(table).upsert(snake,{onConflict:'id'});
+  if(error)console.error('sbUpsert '+table+':',error);
+}
+async function sbInsert(table,record){
+  const snake=camelToSnake(record);
+  // Let Supabase generate UUID if our local id is not a UUID
+  const isUuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if(snake.id&&!isUuid.test(snake.id))delete snake.id;
+  const{data,error}=await sb.from(table).insert(snake).select().single();
+  if(error)console.error('sbInsert '+table+':',error);
+  return data?snakeToCamel(data):null;
+}
+async function sbUpdate(table,id,fields){
+  const snake=camelToSnake(fields);
+  const{error}=await sb.from(table).update(snake).eq('id',id);
+  if(error)console.error('sbUpdate '+table+':',error);
+}
+async function sbDelete(table,id){
+  const{error}=await sb.from(table).delete().eq('id',id);
+  if(error)console.error('sbDelete '+table+':',error);
+}
+
+async function fetchChatMsgs(jbId){
+  if(!_supabaseOk){_memChatMsgs[jbId]=(SEED_CHATS[jbId]||[]).map(m=>({...m}));return _memChatMsgs[jbId];}
+  const{data,error}=await sb.from('chat_messages').select('*').eq('channel',jbId).order('created_at');
+  if(error){console.error('fetchChat:',error);_memChatMsgs[jbId]=[];return[];}
+  // Map to the format the app expects: {id, userId, text, files, ts}
+  _memChatMsgs[jbId]=(data||[]).map(m=>{const c=snakeToCamel(m);return{id:c.id,userId:c.userId,text:c.text,files:c.files||[],ts:c.createdAt}});
+  return _memChatMsgs[jbId];
+}
+
+async function init(){await fetchAllData();initTheme()}
 
 // ===== THEME =====
 const MOON_SVG='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
@@ -1030,23 +1136,16 @@ function copyText(text){if(!text)return;navigator.clipboard.writeText(text).then
 function toggleExpand(el,e){if(e)e.stopPropagation();const txt=el.querySelector('.exp-txt');const bar=el.querySelector('.exp-bar');const open=el.classList.toggle('exp-open');txt.style.webkitLineClamp=open?'unset':'2';txt.style.overflow=open?'visible':'hidden';txt.style.display=open?'block':'-webkit-box';bar.style.display=open?'flex':'none'}
 function expCell(rawText){if(!rawText)return'<span style="font-size:12px;color:var(--text-muted);font-style:italic">—</span>';const safe=esc(rawText);const json=JSON.stringify(rawText);return`<div class="exp-wrap" onclick="toggleExpand(this,event)" title="Click to expand"><div class="exp-txt">${safe}</div><div class="exp-bar"><button class="exp-copy-btn" onclick="event.stopPropagation();copyText(${json})"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button></div></div>`}
 
-// ===== PRESENCE =====
-const PRESENCE_KEY='tf_presence';
-const PRESENCE_TTL=15000; // 15s — considered online
-const PRESENCE_BEAT=5000;  // 5s heartbeat
-let _presenceInterval=null;
-function getPresenceMap(){try{return JSON.parse(localStorage.getItem(PRESENCE_KEY)||'{}')}catch{return{}}}
-function savePresenceMap(m){try{localStorage.setItem(PRESENCE_KEY,JSON.stringify(m))}catch(e){}}
+// ===== PRESENCE (Supabase Realtime) =====
+let _onlineUserIds=new Set();
+let _presenceChannel=null;
 function refreshPresenceUI(){
-  const count=getOnlineUserIds().size;
-  // Update sidebar badge
+  const count=_onlineUserIds.size;
   document.querySelectorAll('#sb-online-count').forEach(el=>el.textContent=count+' online');
-  // Update chat roster
   const roster=document.getElementById('tc-roster-list');
   if(roster){roster.innerHTML=buildRosterHTML(getUsers());}
   const rosterHead=document.getElementById('tc-roster-head-title');
   if(rosterHead)rosterHead.textContent=`Members · ${getUsers().length} · ${count} online`;
-  // Update presence dots on any visible user avatars
   getUsers().forEach(u=>{
     const online=isOnline(u.id);
     document.querySelectorAll(`.presence-dot[data-uid="${u.id}"]`).forEach(dot=>{
@@ -1056,31 +1155,20 @@ function refreshPresenceUI(){
   });
 }
 function initPresence(userId){
-  const m=getPresenceMap();m[userId]=Date.now();savePresenceMap(m);
-  if(_presenceInterval)clearInterval(_presenceInterval);
-  _presenceInterval=setInterval(()=>{
-    const mp=getPresenceMap();mp[userId]=Date.now();savePresenceMap(mp);
+  if(_presenceChannel){sb.removeChannel(_presenceChannel);}
+  _presenceChannel=sb.channel('online-users');
+  _presenceChannel.on('presence',{event:'sync'},()=>{
+    const state=_presenceChannel.presenceState();
+    _onlineUserIds=new Set();
+    Object.values(state).forEach(arr=>arr.forEach(p=>{if(p.user_id)_onlineUserIds.add(p.user_id);}));
     refreshPresenceUI();
-    // Refresh typing indicators to auto-expire stale typers
-    document.querySelectorAll('[id^="typing-ind-"]').forEach(el=>{
-      const jbId=el.id.replace('typing-ind-','');
-      updateTypingIndicator(jbId);
-    });
-  },PRESENCE_BEAT);
+  }).subscribe(async(status)=>{
+    if(status==='SUBSCRIBED'){
+      await _presenceChannel.track({user_id:userId,name:S.user?S.user.name:''});
+    }
+  });
 }
-// Instantly react when another tab/window updates presence or typing
-window.addEventListener('storage',e=>{
-  if(e.key===PRESENCE_KEY)refreshPresenceUI();
-  if(e.key===NOTIF_KEY)checkNewNotifs();
-  if(e.key===TYPING_KEY){
-    // Update all visible typing indicators
-    document.querySelectorAll('[id^="typing-ind-"]').forEach(el=>{
-      const jbId=el.id.replace('typing-ind-','');
-      updateTypingIndicator(jbId);
-    });
-  }
-});
-// ===== BROWSER NOTIFICATIONS =====
+// ===== BROWSER NOTIFICATIONS (Supabase) =====
 const NOTIF_KEY='tf_notifs';
 let _seenNotifs=new Set();
 function requestNotifPermission(){
@@ -1088,62 +1176,70 @@ function requestNotifPermission(){
     Notification.requestPermission();
   }
 }
-function pushTaskNotifs(assignees,taskTitle,taskId,jbId){
-  // Write a notification entry for each assignee who isn't the current actor
+async function pushTaskNotifs(assignees,taskTitle,taskId,jbId){
   const actors=assignees.filter(id=>id!==S.user.id);
   if(!actors.length)return;
-  try{
-    const data=JSON.parse(localStorage.getItem(NOTIF_KEY)||'[]');
-    const jb=jbId?getJobBags().find(j=>j.id===jbId):null;
-    actors.forEach(targetId=>{
-      data.push({id:uid('n'),targetUserId:targetId,taskId,taskTitle,assignerName:S.user.name,jbName:jb?jb.name:null,ts:Date.now()});
-    });
-    localStorage.setItem(NOTIF_KEY,JSON.stringify(data));
-  }catch(e){}
+  if(!_supabaseOk)return;
+  const jb=jbId?getJobBags().find(j=>j.id===jbId):null;
+  const rows=actors.map(targetId=>({
+    target_user_id:targetId,task_id:taskId,task_title:taskTitle,
+    assigner_name:S.user.name,jb_name:jb?jb.name:null,read:false
+  }));
+  const{error}=await sb.from('notifications').insert(rows);
+  if(error)console.error('pushNotifs:',error);
 }
-function checkNewNotifs(){
-  if(!S.user||Notification.permission!=='granted')return;
+async function checkNewNotifs(){
+  if(!S.user||!_supabaseOk)return;
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
   try{
-    const data=JSON.parse(localStorage.getItem(NOTIF_KEY)||'[]');
-    const mine=data.filter(n=>n.targetUserId===S.user.id&&!_seenNotifs.has(n.id));
-    mine.forEach(n=>{
+    const{data}=await sb.from('notifications').select('*').eq('target_user_id',S.user.id).eq('read',false).order('created_at',{ascending:false}).limit(20);
+    if(!data)return;
+    data.forEach(n=>{
+      if(_seenNotifs.has(n.id))return;
       _seenNotifs.add(n.id);
-      const body=n.assignerName+' assigned you a task'+(n.jbName?' on '+n.jbName:'');
-      new Notification(n.taskTitle,{body,icon:'/favicon.ico',tag:n.id});
+      const body=n.assigner_name+' assigned you a task'+(n.jb_name?' on '+n.jb_name:'');
+      new Notification(n.task_title,{body,icon:'/favicon.ico',tag:n.id});
     });
-    // Prune old entries (keep last 200) to prevent unbounded growth
-    if(data.length>200){
-      localStorage.setItem(NOTIF_KEY,JSON.stringify(data.slice(-200)));
+    // Mark as read
+    if(data.length){
+      await sb.from('notifications').update({read:true}).in('id',data.map(n=>n.id));
     }
-  }catch(e){}
+  }catch(e){console.error('checkNotifs:',e);}
 }
 
-// ===== TYPING INDICATOR =====
+// ===== TYPING INDICATOR (Supabase Broadcast) =====
 const TYPING_KEY='tf_typing';
 const TYPING_TTL=4000;
 let _typingTimer=null;
+let _typingState={};// {jbId: {userId: {name, ts}}}
+let _typingChannels={};
 function setTyping(jbId){
-  try{
-    const data=JSON.parse(localStorage.getItem(TYPING_KEY)||'{}');
-    data[S.user.id+'_'+jbId]={userId:S.user.id,name:S.user.name,jbId,ts:Date.now()};
-    localStorage.setItem(TYPING_KEY,JSON.stringify(data));
-  }catch(e){}
+  if(!S.user)return;
+  const ch=_getTypingChannel(jbId);
+  ch.send({type:'broadcast',event:'typing',payload:{userId:S.user.id,name:S.user.name,jbId}});
   clearTimeout(_typingTimer);
   _typingTimer=setTimeout(()=>clearTyping(jbId),TYPING_TTL);
 }
 function clearTyping(jbId){
-  try{
-    const data=JSON.parse(localStorage.getItem(TYPING_KEY)||'{}');
-    delete data[S.user.id+'_'+jbId];
-    localStorage.setItem(TYPING_KEY,JSON.stringify(data));
-  }catch(e){}
+  // No explicit clear needed with TTL-based expiry
+}
+function _getTypingChannel(jbId){
+  if(_typingChannels[jbId])return _typingChannels[jbId];
+  const ch=sb.channel('typing-'+jbId);
+  ch.on('broadcast',{event:'typing'},({payload})=>{
+    if(!payload||payload.userId===S.user.id)return;
+    if(!_typingState[jbId])_typingState[jbId]={};
+    _typingState[jbId][payload.userId]={name:payload.name,ts:Date.now()};
+    updateTypingIndicator(jbId);
+  }).subscribe();
+  _typingChannels[jbId]=ch;
+  return ch;
 }
 function getTypingUsers(jbId){
-  try{
-    const data=JSON.parse(localStorage.getItem(TYPING_KEY)||'{}');
-    const now=Date.now();
-    return Object.values(data).filter(t=>t.jbId===jbId&&t.userId!==S.user.id&&(now-t.ts)<TYPING_TTL);
-  }catch(e){return[];}
+  const state=_typingState[jbId];
+  if(!state)return[];
+  const now=Date.now();
+  return Object.entries(state).filter(([uid,t])=>uid!==S.user.id&&(now-t.ts)<TYPING_TTL).map(([uid,t])=>({userId:uid,name:t.name,jbId}));
 }
 function updateTypingIndicator(jbId){
   const ind=document.getElementById('typing-ind-'+jbId);
@@ -1157,14 +1253,15 @@ function updateTypingIndicator(jbId){
 }
 
 function clearPresence(userId){
-  if(_presenceInterval){clearInterval(_presenceInterval);_presenceInterval=null;}
-  const m=getPresenceMap();delete m[userId];savePresenceMap(m);
+  if(_presenceChannel){
+    _presenceChannel.untrack();
+    sb.removeChannel(_presenceChannel);
+    _presenceChannel=null;
+  }
+  _onlineUserIds.delete(userId);
 }
-function getOnlineUserIds(){
-  const m=getPresenceMap();const now=Date.now();
-  return new Set(Object.entries(m).filter(([,ts])=>now-ts<PRESENCE_TTL).map(([id])=>id));
-}
-function isOnline(userId){return getOnlineUserIds().has(userId)}
+function getOnlineUserIds(){return _onlineUserIds}
+function isOnline(userId){return _onlineUserIds.has(userId)}
 function buildRosterHTML(users){
   const onlineIds=getOnlineUserIds();
   const sorted=[...users].sort((a,b)=>(onlineIds.has(b.id)?1:0)-(onlineIds.has(a.id)?1:0));
@@ -1185,16 +1282,35 @@ function buildRosterHTML(users){
 }
 window.addEventListener('beforeunload',()=>{if(S&&S.user)clearPresence(S.user.id)});
 
-// ===== AUTH =====
-function fill(u,p){document.getElementById('lu').value=u;document.getElementById('lp').value=p;document.getElementById('login-error').style.display='none'}
-function doLogin(){
+// ===== AUTH (Supabase) =====
+function fill(email,p){document.getElementById('lu').value=email;document.getElementById('lp').value=p;document.getElementById('login-error').style.display='none'}
+async function doLogin(){
+  const btn=document.getElementById('login-btn');
+  if(btn){btn.disabled=true;btn.textContent='Signing in...';}
   try{
-    const u=document.getElementById('lu').value.trim();
-    const p=document.getElementById('lp').value;
-    const user=getUsers().find(x=>x.username===u&&x.password===p);
-    if(!user){document.getElementById('login-error').style.display='block';return}
+    const email=document.getElementById('lu').value.trim();
+    const password=document.getElementById('lp').value;
+    if(!email||!password){document.getElementById('login-error').style.display='block';if(btn){btn.disabled=false;btn.textContent='Sign In';}return}
+    const{data:authData,error:authError}=await sb.auth.signInWithPassword({email,password});
+    if(authError){
+      document.getElementById('login-error').textContent=authError.message||'Invalid email or password.';
+      document.getElementById('login-error').style.display='block';
+      if(btn){btn.disabled=false;btn.textContent='Sign In';}
+      return;
+    }
     document.getElementById('login-error').style.display='none';
+    // Fetch profile
+    const{data:profile,error:profErr}=await sb.from('profiles').select('*').eq('id',authData.user.id).single();
+    if(profErr||!profile){
+      document.getElementById('login-error').textContent='Profile not found. Contact admin.';
+      document.getElementById('login-error').style.display='block';
+      if(btn){btn.disabled=false;btn.textContent='Sign In';}
+      return;
+    }
+    const user=snakeToCamel(profile);
+    user.email=email;
     S.user=user;S.view='tasks';S.tv='list';S.fp='all';S.fs='all';
+    await fetchAllData();
     initPresence(user.id);
     try{requestNotifPermission();}catch(e){}
     try{checkNewNotifs();}catch(e){}
@@ -1203,15 +1319,19 @@ function doLogin(){
     app.style.removeProperty('display');
     app.style.display='flex';
     renderSidebar();renderMain();
+    setupRealtimeSubscriptions();
   }catch(err){
     console.error('Login error:',err);
     document.getElementById('login-error').textContent='Something went wrong: '+err.message;
     document.getElementById('login-error').style.display='block';
   }
+  if(btn){btn.disabled=false;btn.textContent='Sign In';}
 }
-function doLogout(){
+async function doLogout(){
   if(S.user)clearPresence(S.user.id);
+  await sb.auth.signOut();
   S.user=null;
+  _memUsers=null;_memTasks=null;_memClients=null;_memJobBags=null;_memTimeLogs=null;
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('lu').value='';document.getElementById('lp').value='';
@@ -1289,8 +1409,11 @@ function ico(k){
 }
 
 // ===== MAIN =====
-function renderMain(){
+async function renderMain(){
   const m=document.getElementById('main');
+  // Pre-fetch chat messages if needed
+  if(S.view==='teamchat'&&_supabaseOk&&!_memChatMsgs['team']){await fetchChatMsgs('team');}
+  if(S.view==='jobbags'&&S.jbId&&S.jbTab==='chat'&&_supabaseOk&&!_memChatMsgs[S.jbId]){await fetchChatMsgs(S.jbId);}
   if(S.view==='tasks')m.innerHTML=renderTasksPage();
   else if(S.view==='team')m.innerHTML=renderTeamPage();
   else if(S.view==='users')m.innerHTML=renderUsersPage();
@@ -1497,7 +1620,8 @@ function kDrop(e,col){
   const task=tasks.find(t=>t.id===id);
   if(!task||task.status===newStatus)return;
   task.status=newStatus;
-  saveTasks(tasks);
+  _memTasks=tasks;
+  if(_supabaseOk)sbUpdate('tasks',id,{status:newStatus});
   _dragMoved=true;
   toast(`Moved to ${newStatus==='todo'?'To Do':newStatus==='inprogress'?'In Progress':'Done'}`);
   renderSidebar();renderMain();
@@ -1697,7 +1821,7 @@ function onClientChange(clientId){
   sel.innerHTML='<option value="">No job bag</option>'+jbs.map(j=>`<option value="${j.id}">${esc(j.name)}</option>`).join('');
 }
 
-function saveAddTask(){
+async function saveAddTask(){
   const description=document.getElementById('md').value.trim();
   if(!description){toast('Please enter a description','error');return}
   const isAdmin=S.user.role==='admin';
@@ -1712,9 +1836,13 @@ function saveAddTask(){
   const bhVal=document.getElementById('mt-bh')?.value;
   const billableH=isReminder?null:(bhVal&&bhVal!==''?parseFloat(bhVal):null);
   const tasks=getTasks();
-  const newTask={id:uid('t'),title:description,description,priority:document.getElementById('mp').value,status:document.getElementById('ms').value,assignees,createdAt:TODAY.toISOString(),dueDate:document.getElementById('mdd').value||null,createdBy:S.user.id,isReminder,jobBagId:jobBagId||null,billableH};
+  const newTask={id:uid('t'),title:description,description,priority:document.getElementById('mp').value,status:document.getElementById('ms').value,assignees,createdAt:new Date().toISOString(),dueDate:document.getElementById('mdd').value||null,createdBy:S.user.id,isReminder,jobBagId:jobBagId||null,billableH};
+  if(_supabaseOk){
+    const inserted=await sbInsert('tasks',newTask);
+    if(inserted){newTask.id=inserted.id;}
+  }
   tasks.push(newTask);
-  saveTasks(tasks);_memTasks=null;
+  _memTasks=tasks;
   pushTaskNotifs(assignees,description,newTask.id,jobBagId||null);
   closeModal();renderSidebar();renderMain();toast('Task added');
 }
@@ -1784,7 +1912,7 @@ function openEditTask(id){
   requestAnimationFrame(()=>{const el=document.getElementById('md');if(el){el.style.height='auto';el.style.height=el.scrollHeight+'px'}});
 }
 
-function saveEditTask(id){
+async function saveEditTask(id){
   const description=document.getElementById('md').value.trim();
   if(!description){toast('Please enter a description','error');return}
   const isAdmin=S.user.role==='admin';
@@ -1798,14 +1926,21 @@ function saveEditTask(id){
   if(wasNotQuoted&&isNowQuoted){
     const tl=getTimeLogs();
     const updated=tl.map(l=>l.taskId===id?{...l,billableH:0}:l);
-    saveTimeLogs(updated);
+    _memTimeLogs=updated;
+    if(_supabaseOk){
+      const logsToUpdate=updated.filter(l=>l.taskId===id);
+      for(const l of logsToUpdate){sbUpdate('time_logs',l.id,{billableH:0});}
+    }
     toast('Billable hours set. Previous time logs have been reset to 0 billable — please update them.','warn');
   }
   const prevAssignees=tasks[idx].assignees||[];
-  tasks[idx]={...tasks[idx],title:description,description,priority:document.getElementById('mp').value,status:document.getElementById('ms').value,dueDate:document.getElementById('mdd').value||null,assignees,billableH};
-  saveTasks(tasks);_memTasks=null;
-  // Notify only newly added assignees
-  const newlyAssigned=assignees.filter(id=>!prevAssignees.includes(id));
+  const priority=document.getElementById('mp').value;
+  const status=document.getElementById('ms').value;
+  const dueDate=document.getElementById('mdd').value||null;
+  tasks[idx]={...tasks[idx],title:description,description,priority,status,dueDate,assignees,billableH};
+  _memTasks=tasks;
+  if(_supabaseOk)sbUpdate('tasks',id,{title:description,description,priority,status,dueDate,assignees,billableH});
+  const newlyAssigned=assignees.filter(aid=>!prevAssignees.includes(aid));
   if(newlyAssigned.length)pushTaskNotifs(newlyAssigned,description,id,tasks[idx].jobBagId||null);
   closeModal();renderSidebar();renderMain();if(!wasNotQuoted||!isNowQuoted)toast('Task updated');
 }
@@ -1820,7 +1955,7 @@ function openAddUser(){
     <div class="modal-body">
       <div class="form-group"><label class="form-label">Full Name *</label><input class="form-input" type="text" id="mn" placeholder="e.g. Jane Doe"></div>
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Username *</label><input class="form-input" type="text" id="mun" placeholder="e.g. jane"></div>
+        <div class="form-group"><label class="form-label">Email *</label><input class="form-input" type="email" id="mun" placeholder="e.g. jane@company.com"></div>
         <div class="form-group"><label class="form-label">Password *</label><input class="form-input" type="password" id="mpw" placeholder="Password"></div>
       </div>
       <div class="form-row">
@@ -1841,18 +1976,31 @@ function pickColor(c,el){
   el.style.borderColor='#fff';el.style.boxShadow='0 0 0 2px '+c;el.classList.add('selected');
 }
 
-function saveAddUser(){
+async function saveAddUser(){
   const name=document.getElementById('mn').value.trim();
   const username=document.getElementById('mun').value.trim();
   const pw=document.getElementById('mpw').value;
   if(!name){toast('Enter a name','error');return}
-  if(!username){toast('Enter a username','error');return}
+  if(!username){toast('Enter a username/email','error');return}
   if(!pw){toast('Enter a password','error');return}
   const users=getUsers();
   if(users.find(u=>u.username===username)){toast('Username taken','error');return}
   const color=document.getElementById('mcolor')?.value||S.ec||COLORS[0];
-  users.push({id:uid('u'),name,username,password:pw,role:document.getElementById('mr').value,color,targetH:parseFloat(document.getElementById('mth').value)||0});
-  saveUsers(users);closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User added');
+  const role=document.getElementById('mr').value;
+  const targetH=parseFloat(document.getElementById('mth').value)||0;
+  if(_supabaseOk){
+    try{
+      // Call serverless function to create auth user
+      const resp=await fetch('/api/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:username,password:pw,name,role,color,targetH,username})});
+      const result=await resp.json();
+      if(!resp.ok)throw new Error(result.error||'Failed to create user');
+      await fetchAllData();
+      closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User added');
+    }catch(err){toast('Error: '+err.message,'error');console.error(err);}
+  } else {
+    users.push({id:uid('u'),name,username,password:pw,role,color,targetH});
+    saveUsers(users);closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User added');
+  }
 }
 
 // ===== EDIT USER =====
@@ -1879,7 +2027,7 @@ function openEditUser(id){
     </div>`);
 }
 
-function saveEditUser(id){
+async function saveEditUser(id){
   const name=document.getElementById('mn').value.trim();
   const username=document.getElementById('mun').value.trim();
   const pw=document.getElementById('mpw').value;
@@ -1887,20 +2035,29 @@ function saveEditUser(id){
   const users=getUsers();const idx=users.findIndex(u=>u.id===id);if(idx===-1)return;
   if(users.find(u=>u.username===username&&u.id!==id)){toast('Username taken','error');return}
   const targetH=parseFloat(document.getElementById('mth').value)||0;
-  users[idx]={...users[idx],name,username,role:document.getElementById('mr').value,color:S.ec||users[idx].color,targetH,...(pw?{password:pw}:{})};
+  const color=S.ec||users[idx].color;
+  const role=document.getElementById('mr').value;
+  users[idx]={...users[idx],name,username,role,color,targetH};
   if(S.user.id===id)S.user={...S.user,...users[idx]};
-  saveUsers(users);closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User updated');
+  _memUsers=users;
+  if(_supabaseOk){
+    await sbUpdate('profiles',id,{name,username,role,color,targetH});
+  }
+  closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User updated');
 }
 
 // ===== ACTIONS =====
-function toggleDone(id){
+async function toggleDone(id){
   const tasks=getTasks();const t=tasks.find(x=>x.id===id);if(!t)return;
   t.status=t.status==='done'?'todo':'done';
-  saveTasks(tasks);renderSidebar();renderMain();
+  _memTasks=tasks;
+  if(_supabaseOk)sbUpdate('tasks',id,{status:t.status});
+  renderSidebar();renderMain();
 }
 
-function delTask(id){
-  saveTasks(getTasks().filter(t=>t.id!==id));
+async function delTask(id){
+  _memTasks=getTasks().filter(t=>t.id!==id);
+  if(_supabaseOk)sbDelete('tasks',id);
   closeModal();renderSidebar();renderMain();toast('Task deleted');
 }
 function delTaskConfirm(id){
@@ -1963,7 +2120,7 @@ function updateMoveJobBags(){
     ?`<option value="">Select job bag…</option>`+jbs.map(j=>`<option value="${j.id}">${esc(j.name)}</option>`).join('')
     :`<option value="">No active job bags for this client</option>`;
 }
-function saveMoveTask(taskId){
+async function saveMoveTask(taskId){
   const newJbId=document.getElementById('mv-jb').value;
   if(!newJbId){toast('Select a job bag','error');return}
   const jb=getJobBags().find(j=>j.id===newJbId);
@@ -1971,19 +2128,27 @@ function saveMoveTask(taskId){
   const idx=tasks.findIndex(t=>t.id===taskId);
   if(idx<0)return;
   tasks[idx].jobBagId=newJbId;
-  // Update time logs to reference new job bag
   const tl=getTimeLogs().map(l=>l.taskId===taskId?{...l,jobBagId:newJbId}:l);
-  saveTimeLogs(tl);
-  saveTasks(tasks);
+  _memTimeLogs=tl;_memTasks=tasks;
+  if(_supabaseOk){
+    sbUpdate('tasks',taskId,{jobBagId:newJbId});
+    tl.filter(l=>l.taskId===taskId).forEach(l=>sbUpdate('time_logs',l.id,{jobBagId:newJbId}));
+  }
   closeModal();renderMain();
   toast(`Moved to "${jb.name}"`);
 }
 
-function delUser(id){
+async function delUser(id){
   if(!confirm('Delete this user? Their tasks will also be removed.'))return;
   const users=getUsers().filter(u=>u.id!==id);
   const tasks=getTasks().map(t=>({...t,assignees:t.assignees.filter(x=>x!==id)})).filter(t=>t.assignees.length>0);
-  saveUsers(users);saveTasks(tasks);closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User deleted');
+  _memUsers=users;_memTasks=tasks;
+  if(_supabaseOk){
+    sbDelete('profiles',id);
+    // Update tasks that had this user assigned
+    for(const t of tasks){sbUpdate('tasks',t.id,{assignees:t.assignees});}
+  }
+  closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User deleted');
 }
 
 // ===== CLIENTS PAGE =====
@@ -2385,39 +2550,48 @@ function fmtDateShort(iso){if(!iso)return'';const d=new Date(iso);return d.toLoc
 function fmtTime(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}
 
 function viewClientJbs(cid){S.clientId=cid;sv('jobbags')}
-function openJobBag(jbId){S.jbId=jbId;S.jbTab='timesheet';renderMain()}
+async function openJobBag(jbId){S.jbId=jbId;S.jbTab='timesheet';if(_supabaseOk&&!_memChatMsgs[jbId])fetchChatMsgs(jbId);renderMain()}
 
 function rteCmd(cmd,val){document.execCommand(cmd,false,val||null);document.getElementById('rte-'+S.jbId)?.focus()}
 
-function saveBrief(jbId){
+async function saveBrief(jbId){
   const el=document.getElementById('rte-'+jbId);if(!el)return;
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
   jbs[idx].description=el.innerHTML;
-  saveJobBags(jbs);toast('Brief saved');
+  _memJobBags=jbs;
+  if(_supabaseOk)sbUpdate('job_bags',jbId,{description:el.innerHTML});
+  toast('Brief saved');
 }
 
 async function handleBriefFiles(e,jbId){
   const files=[...e.target.files];
   if(!files.length)return;
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
+  if(!jbs[idx].files)jbs[idx].files=[];
   toast('Uploading '+files.length+' file'+(files.length>1?'s':'')+'...');
   for(const f of files){
     try{
       const uploaded=await uploadToFTP(f,'jobbag');
       jbs[idx].files.push(uploaded);
+      if(_supabaseOk){
+        await sb.from('job_bag_files').insert({job_bag_id:jbId,name:uploaded.name,type:uploaded.type,size:uploaded.size,url:uploaded.url,storage_path:uploaded.storagePath||null,uploaded_by:S.user.id});
+      }
     }catch(err){toast('Upload failed: '+f.name,'error');console.error(err);}
   }
-  saveJobBags(jbs);
+  _memJobBags=jbs;
   const fg=document.getElementById('fg-'+jbId);
   if(fg)fg.innerHTML=renderFileGrid(jbs[idx].files,jbId,true);
   toast(files.length+' file'+(files.length>1?'s':'')+' uploaded');
   e.target.value='';
 }
 
-function removeBriefFile(jbId,idx){
+async function removeBriefFile(jbId,idx){
   const jbs=getJobBags();const jbIdx=jbs.findIndex(j=>j.id===jbId);if(jbIdx===-1)return;
-  jbs[jbIdx].files.splice(idx,1);
-  saveJobBags(jbs);
+  const removed=jbs[jbIdx].files.splice(idx,1)[0];
+  _memJobBags=jbs;
+  if(_supabaseOk&&removed&&removed.storagePath){
+    sb.storage.from('uploads').remove([removed.storagePath]);
+  }
   const fg=document.getElementById('fg-'+jbId);if(fg)fg.innerHTML=renderFileGrid(jbs[jbIdx].files,jbId,true);
 }
 
@@ -2436,20 +2610,17 @@ function viewFile(jbId,idx){
 let _chatFiles={};
 let _uploadQueue=0;
 async function uploadToFTP(file,folder){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=async ev=>{
-      try{
-        _uploadQueue++;
-        const resp=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,fileData:ev.target.result,folder:folder||'chat'})});
-        const data=await resp.json();
-        _uploadQueue--;
-        if(!resp.ok)throw new Error(data.error||'Upload failed');
-        resolve({name:file.name,type:file.type,size:file.size,data:data.url,url:data.url});
-      }catch(err){_uploadQueue--;reject(err);}
-    };
-    reader.readAsDataURL(file);
-  });
+  if(!_supabaseOk)throw new Error('Not connected to Supabase');
+  _uploadQueue++;
+  try{
+    const ext=file.name.split('.').pop();
+    const path=`${folder||'chat'}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const{data,error}=await sb.storage.from('uploads').upload(path,file);
+    if(error)throw error;
+    const{data:{publicUrl}}=sb.storage.from('uploads').getPublicUrl(path);
+    _uploadQueue--;
+    return{name:file.name,type:file.type,size:file.size,data:publicUrl,url:publicUrl,storagePath:path};
+  }catch(err){_uploadQueue--;throw err;}
 }
 function fmtFileSize(bytes){if(!bytes)return'';if(bytes<1024)return bytes+'B';if(bytes<1048576)return(bytes/1024).toFixed(1)+'KB';return(bytes/1048576).toFixed(1)+'MB'}
 function fileTypeIcon(type){
@@ -2529,22 +2700,26 @@ function insertEmoji(jbId,emoji){
 }
 // Close emoji picker on outside click
 document.addEventListener('click',e=>{if(!e.target.closest('.emoji-picker-wrap'))document.querySelectorAll('.emoji-picker.open').forEach(p=>p.classList.remove('open'))});
-function deleteChatMsg(jbId,msgId){
-  const msgs=getChatMsgs(jbId).filter(m=>m.id!==msgId);
-  saveChatMsgs(jbId,msgs);
-  // Remove the message element directly without full re-render to preserve scroll
+async function deleteChatMsg(jbId,msgId){
+  _memChatMsgs[jbId]=(getChatMsgs(jbId)||[]).filter(m=>m.id!==msgId);
+  if(_supabaseOk)sbDelete('chat_messages',msgId);
   const el=document.getElementById('cmsg-'+msgId);
   if(el)el.remove();
 }
-function sendChatMsg(jbId){
+async function sendChatMsg(jbId){
   const inp=document.getElementById('chat-inp-'+jbId);if(!inp)return;
   const text=inp.value.trim();
   const files=_chatFiles[jbId]||[];
   if(!text&&files.length===0)return;
   clearTyping(jbId);
-  const msgs=getChatMsgs(jbId);
-  msgs.push({id:uid('cm'),userId:S.user.id,text,files,ts:new Date().toISOString()});
-  saveChatMsgs(jbId,msgs);
+  const newMsg={id:uid('cm'),userId:S.user.id,text,files,ts:new Date().toISOString()};
+  if(_supabaseOk){
+    const{data,error}=await sb.from('chat_messages').insert({channel:jbId,user_id:S.user.id,text,files:files.length?files:null}).select().single();
+    if(data){newMsg.id=data.id;newMsg.ts=data.created_at;}
+    if(error)console.error('sendChat:',error);
+  }
+  if(!_memChatMsgs[jbId])_memChatMsgs[jbId]=[];
+  _memChatMsgs[jbId].push(newMsg);
   inp.value='';inp.style.height='auto';
   _chatFiles[jbId]=[];
   renderChatFilePrev(jbId);
@@ -2583,21 +2758,26 @@ function openLogTime(taskId,jbId){
     </div>`);
   dpInit('lt-d',todayStr);
 }
-function saveTimeLog(taskId,jbId,isQuoted){
+async function saveTimeLog(taskId,jbId,isQuoted){
   const h=parseFloat(document.getElementById('lt-h').value);
   if(!h||h<=0){toast('Select logged hours','error');return}
-  // If Not Quoted, billable mirrors logged; otherwise use the selected value
   const bhRaw=parseFloat(document.getElementById('lt-bh').value)||0;
   const bh=(isQuoted==='true'||isQuoted===true)?bhRaw:h;
   const logs=getTimeLogs();
-  logs.push({id:uid('tl'),taskId,jobBagId:jbId,userId:S.user.id,hours:h,billableH:bh,date:document.getElementById('lt-d').value||TODAY.toISOString().split('T')[0],notes:document.getElementById('lt-n').value.trim()});
-  saveTimeLogs(logs);
+  const newLog={id:uid('tl'),taskId,jobBagId:jbId,userId:S.user.id,hours:h,billableH:bh,date:document.getElementById('lt-d').value||TODAY.toISOString().split('T')[0],notes:document.getElementById('lt-n').value.trim()};
+  if(_supabaseOk){
+    const inserted=await sbInsert('time_logs',newLog);
+    if(inserted)newLog.id=inserted.id;
+  }
+  logs.push(newLog);
+  _memTimeLogs=logs;
   closeModal();toast('Time logged: '+fmtHM(h)+(bh!==h?' · '+fmtHM(bh)+' billable':''));
   renderMain();
 }
-function delTimeLog(id){
+async function delTimeLog(id){
   closeModal();
-  saveTimeLogs(getTimeLogs().filter(l=>l.id!==id));
+  _memTimeLogs=getTimeLogs().filter(l=>l.id!==id);
+  if(_supabaseOk)sbDelete('time_logs',id);
   renderMain();toast('Time entry removed');
 }
 
@@ -2641,7 +2821,7 @@ function openEditTimeLog(logId){
     </div>`);
   dpInit('lt-d',log.date);
 }
-function saveEditTimeLog(logId){
+async function saveEditTimeLog(logId){
   const h=parseFloat(document.getElementById('lt-h').value);
   if(!h||h<=0){toast('Select logged hours','error');return}
   const isAdmin=S.user.role==='admin';
@@ -2651,8 +2831,12 @@ function saveEditTimeLog(logId){
   const bhRaw=parseFloat(document.getElementById('lt-bh').value)||0;
   const bh=isQuoted?bhRaw:h;
   const userId=isAdmin&&document.getElementById('lt-u')?document.getElementById('lt-u').value:logs[idx].userId;
-  logs[idx]={...logs[idx],hours:h,billableH:bh,date:document.getElementById('lt-d').value||logs[idx].date,notes:document.getElementById('lt-n').value.trim(),userId};
-  saveTimeLogs(logs);closeModal();toast('Time entry updated');renderMain();
+  const date=document.getElementById('lt-d').value||logs[idx].date;
+  const notes=document.getElementById('lt-n').value.trim();
+  logs[idx]={...logs[idx],hours:h,billableH:bh,date,notes,userId};
+  _memTimeLogs=logs;
+  if(_supabaseOk)sbUpdate('time_logs',logId,{hours:h,billableH:bh,date,notes,userId});
+  closeModal();toast('Time entry updated');renderMain();
 }
 
 // ===== CLIENT CRUD =====
@@ -2668,12 +2852,17 @@ function openAddClient(){
       <button class="btn btn-primary" style="width:auto" onclick="saveAddClient()">Add Client</button>
     </div>`);
 }
-function saveAddClient(){
+async function saveAddClient(){
   const name=document.getElementById('mc-n').value.trim();
   if(!name){toast('Enter company name','error');return}
   const clients=getClients();
-  clients.push({id:uid('c'),name,contact:document.getElementById('mc-e').value.trim(),createdAt:new Date().toISOString()});
-  saveClients(clients);closeModal();renderMain();toast('Client added');
+  const newClient={id:uid('c'),name,contact:document.getElementById('mc-e').value.trim(),createdAt:new Date().toISOString()};
+  if(_supabaseOk){
+    const inserted=await sbInsert('clients',newClient);
+    if(inserted)newClient.id=inserted.id;
+  }
+  clients.push(newClient);
+  _memClients=clients;closeModal();renderMain();toast('Client added');
 }
 function openEditClient(id){
   const c=getClients().find(x=>x.id===id);if(!c)return;
@@ -2688,18 +2877,25 @@ function openEditClient(id){
       <button class="btn btn-primary" style="width:auto" onclick="saveEditClient('${c.id}')">Save</button>
     </div>`);
 }
-function saveEditClient(id){
+async function saveEditClient(id){
   const name=document.getElementById('mc-n').value.trim();
   if(!name){toast('Enter company name','error');return}
   const clients=getClients();const idx=clients.findIndex(c=>c.id===id);if(idx===-1)return;
-  clients[idx]={...clients[idx],name,contact:document.getElementById('mc-e').value.trim()};
-  saveClients(clients);closeModal();renderMain();toast('Client updated');
+  const contact=document.getElementById('mc-e').value.trim();
+  clients[idx]={...clients[idx],name,contact};
+  _memClients=clients;
+  if(_supabaseOk)sbUpdate('clients',id,{name,contact});
+  closeModal();renderMain();toast('Client updated');
 }
-function delClient(id){
+async function delClient(id){
   if(!confirm('Delete this client and all their job bags?'))return;
   const jbs=getJobBags().filter(j=>j.clientId!==id);
-  saveJobBags(jbs);
-  saveClients(getClients().filter(c=>c.id!==id));
+  _memJobBags=jbs;_memClients=getClients().filter(c=>c.id!==id);
+  if(_supabaseOk){
+    sbDelete('clients',id);
+    // job bags cascade or delete manually
+    getJobBags().filter(j=>j.clientId===id).forEach(j=>sbDelete('job_bags',j.id));
+  }
   renderMain();toast('Client deleted');
 }
 
@@ -2732,15 +2928,20 @@ function openAddJobBag(){
       <button class="btn btn-primary" style="width:auto" onclick="saveAddJobBag()">Create Job Bag</button>
     </div>`);
 }
-function saveAddJobBag(){
+async function saveAddJobBag(){
   const clientId=document.getElementById('jb-client').value;
   const name=document.getElementById('jb-name').value.trim();
   if(!clientId){toast('Select a client','error');return}
   if(!name){toast('Enter job bag name','error');return}
   const sel=[...document.getElementById('jb-members').querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid);
   const jbs=getJobBags();
-  jbs.push({id:uid('jb'),clientId,name,description:'',status:'active',members:sel,createdAt:new Date().toISOString(),createdBy:S.user.id,files:[]});
-  saveJobBags(jbs);closeModal();renderMain();toast('Job bag created');
+  const newJb={id:uid('jb'),clientId,name,description:'',status:'active',members:sel,createdAt:new Date().toISOString(),createdBy:S.user.id,files:[]};
+  if(_supabaseOk){
+    const inserted=await sbInsert('job_bags',newJb);
+    if(inserted)newJb.id=inserted.id;
+  }
+  jbs.push(newJb);
+  _memJobBags=jbs;closeModal();renderMain();toast('Job bag created');
 }
 function openEditJobBag(jbId){
   const jb=getJobBags().find(j=>j.id===jbId);if(!jb)return;
@@ -2784,7 +2985,7 @@ function openEditJobBag(jbId){
       <button class="btn btn-primary" style="width:auto" onclick="saveEditJobBag('${jbId}')">Save</button>
     </div>`);
 }
-function saveEditJobBag(jbId){
+async function saveEditJobBag(jbId){
   const clientId=document.getElementById('jb-client').value;
   const name=document.getElementById('jb-name').value.trim();
   if(!clientId||!name){toast('Client and name required','error');return}
@@ -2795,29 +2996,30 @@ function saveEditJobBag(jbId){
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
   const showTimeToClient=!!document.getElementById('jb-show-time')?.checked;
   jbs[idx]={...jbs[idx],clientId,name,members:sel,poNumber:poNumber||null,estimate:estimate||null,invoice:invoice||null,showTimeToClient};
-  saveJobBags(jbs);closeModal();renderMain();toast('Job bag updated');
+  _memJobBags=jbs;
+  if(_supabaseOk)sbUpdate('job_bags',jbId,{clientId,name,members:sel,poNumber:poNumber||null,estimate:estimate||null,invoice:invoice||null,showTimeToClient});
+  closeModal();renderMain();toast('Job bag updated');
 }
 // ===== SHARE LINKS & DUPLICATE =====
 function genToken(){return Math.random().toString(36).slice(2,9)+Math.random().toString(36).slice(2,9)}
 function getPageUrl(){const u=location.href.split('?')[0].split('#')[0];return u}
-function copyJbShareLink(jbId){
+async function copyJbShareLink(jbId){
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
-  if(!jbs[idx].shareToken){jbs[idx].shareToken=genToken();saveJobBags(jbs);}
-  // Also ensure the client has a share token so the portal nav client link works
+  if(!jbs[idx].shareToken){jbs[idx].shareToken=genToken();_memJobBags=jbs;if(_supabaseOk)sbUpdate('job_bags',jbId,{shareToken:jbs[idx].shareToken});}
   if(jbs[idx].clientId){
     const clients=getClients();const cidx=clients.findIndex(c=>c.id===jbs[idx].clientId);
-    if(cidx!==-1&&!clients[cidx].shareToken){clients[cidx].shareToken=genToken();saveClients(clients);}
+    if(cidx!==-1&&!clients[cidx].shareToken){clients[cidx].shareToken=genToken();_memClients=clients;if(_supabaseOk)sbUpdate('clients',clients[cidx].id,{shareToken:clients[cidx].shareToken});}
   }
   const url=getPageUrl()+'?jb='+jbs[idx].shareToken;
   navigator.clipboard.writeText(url).then(()=>toast('Share link copied!')).catch(()=>{prompt('Copy this link:',url)});
 }
-function copyClientShareLink(clientId){
+async function copyClientShareLink(clientId){
   const clients=getClients();const idx=clients.findIndex(c=>c.id===clientId);if(idx===-1)return;
-  if(!clients[idx].shareToken){clients[idx].shareToken=genToken();saveClients(clients);}
+  if(!clients[idx].shareToken){clients[idx].shareToken=genToken();_memClients=clients;if(_supabaseOk)sbUpdate('clients',clientId,{shareToken:clients[idx].shareToken});}
   const url=getPageUrl()+'?client='+clients[idx].shareToken;
   navigator.clipboard.writeText(url).then(()=>toast('Client portal link copied!')).catch(()=>{prompt('Copy this link:',url)});
 }
-function duplicateJobBag(jbId){
+async function duplicateJobBag(jbId){
   const jbs=getJobBags();
   const src=jbs.find(j=>j.id===jbId);if(!src)return;
   const baseName=src.name.replace(/ Copy( \d+)?$/,'');
@@ -2826,13 +3028,21 @@ function duplicateJobBag(jbId){
     let n=2;while(jbs.find(j=>j.name===baseName+' Copy '+n))n++;
     newName=baseName+' Copy '+n;
   }
-  const newId=uid('jb');
-  jbs.push({...src,id:newId,name:newName,shareToken:null,createdAt:new Date().toISOString()});
-  saveJobBags(jbs);
+  const newJb={...src,id:uid('jb'),name:newName,shareToken:null,createdAt:new Date().toISOString()};
+  if(_supabaseOk){
+    const inserted=await sbInsert('job_bags',newJb);
+    if(inserted)newJb.id=inserted.id;
+  }
+  jbs.push(newJb);
+  _memJobBags=jbs;
   const tasks=getTasks();
   const srcTasks=tasks.filter(t=>t.jobBagId===jbId);
-  srcTasks.forEach(t=>tasks.push({...t,id:uid('t'),jobBagId:newId,createdAt:new Date().toISOString()}));
-  saveTasks(tasks);_memTasks=null;
+  for(const t of srcTasks){
+    const nt={...t,id:uid('t'),jobBagId:newJb.id,createdAt:new Date().toISOString()};
+    if(_supabaseOk){const ins=await sbInsert('tasks',nt);if(ins)nt.id=ins.id;}
+    tasks.push(nt);
+  }
+  _memTasks=tasks;
   renderMain();toast('Duplicated as "'+newName+'"');
 }
 
@@ -2965,11 +3175,11 @@ function renderPortalClientDash(client){
     <div class="portal-footer">Powered by TeamFlow &nbsp;·&nbsp; View only</div>
   </div>`;
 }
-function initPortal(){
+async function initPortal(){
   const qp=new URLSearchParams(location.search);
   const jbToken=qp.get('jb');const clientToken=qp.get('client');
   if(!jbToken&&!clientToken)return false;
-  init();
+  await init();
   document.body.innerHTML='<div id="portal-root"></div>';
   document.body.style.cssText='margin:0;padding:0;background:#F5F6FA;font-family:Figtree,sans-serif';
   const root=document.getElementById('portal-root');
@@ -2983,9 +3193,10 @@ function initPortal(){
   return true;
 }
 
-function delJobBag(jbId){
+async function delJobBag(jbId){
   if(!confirm('Delete this job bag?'))return;
-  saveJobBags(getJobBags().filter(j=>j.id!==jbId));
+  _memJobBags=getJobBags().filter(j=>j.id!==jbId);
+  if(_supabaseOk)sbDelete('job_bags',jbId);
   closeModal();S.jbId=null;renderMain();toast('Job bag deleted');
 }
 
@@ -3459,27 +3670,78 @@ function dpFmt(ds){
   return`${DP_MONTHS_S[parseInt(m)-1]} ${parseInt(d)}, ${y}`;
 }
 
+// Email map for login chips (since Supabase profiles don't store passwords)
+const SEED_EMAILS={
+  'admin@in-detail.co.za':{name:'Admin User',role:'admin'},
+  'sg@in-detail.co.za':{name:'Steve Gaitskill',role:'member'},
+  'dd@in-detail.co.za':{name:'Demi de Lange',role:'member'},
+  'kf@in-detail.co.za':{name:'Kaitlin Fillies',role:'member'},
+  'am@in-detail.co.za':{name:'Alex Moss',role:'member'},
+  'gy@in-detail.co.za':{name:'Gerald Yapp',role:'member'},
+  'bc@in-detail.co.za':{name:'Bill Coop',role:'member'},
+  'dw@in-detail.co.za':{name:'Daluci Whiston',role:'member'},
+};
 function refreshLoginChips(){
   const chipsEl=document.getElementById('login-user-chips');
   if(!chipsEl)return;
-  const users=getUsers();
-  chipsEl.innerHTML=users.map(u=>`<div class="demo-chip" onclick="fill('${esc(u.username)}','${esc(u.password||'')}')"><div class="demo-chip-name">${esc(u.name||u.username)}</div><div class="demo-chip-role">${u.role==='admin'?'Administrator':'Member'}</div></div>`).join('');
+  chipsEl.innerHTML=Object.entries(SEED_EMAILS).map(([email,u])=>`<div class="demo-chip" onclick="fill('${esc(email)}','pass123')"><div class="demo-chip-name">${esc(u.name)}</div><div class="demo-chip-role">${u.role==='admin'?'Administrator':'Member'}</div></div>`).join('');
 }
 
-document.addEventListener('DOMContentLoaded',()=>{
-  if(initPortal())return;
-  init();
+document.addEventListener('DOMContentLoaded',async()=>{
+  if(await initPortal())return;
+  initTheme();
   refreshLoginChips();
+  // Register global handlers
   document.getElementById('lp').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
   document.getElementById('lu').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
-  // close date pickers on outside click
   document.addEventListener('click',e=>{
     if(!e.target.closest('.dp-wrap')){
       document.querySelectorAll('.dp-popup.open').forEach(p=>p.classList.remove('open'));
       document.querySelectorAll('.dp-trigger.open').forEach(t=>t.classList.remove('open'));
     }
   });
+  // Auto-login if session exists
+  try{
+    const{data:{session}}=await sb.auth.getSession();
+    if(session&&session.user){
+      const{data:profile}=await sb.from('profiles').select('*').eq('id',session.user.id).single();
+      if(profile){
+        const user=snakeToCamel(profile);
+        user.email=session.user.email;
+        S.user=user;S.view='tasks';S.tv='list';S.fp='all';S.fs='all';
+        await fetchAllData();
+        initPresence(user.id);
+        try{requestNotifPermission();}catch(e){}
+        try{checkNewNotifs();}catch(e){}
+        document.getElementById('login-page').style.display='none';
+        const app=document.getElementById('app');
+        app.style.removeProperty('display');
+        app.style.display='flex';
+        renderSidebar();renderMain();
+        setupRealtimeSubscriptions();
+        return;
+      }
+    }
+  }catch(e){console.error('Auto-login check:',e);}
 });
+
+// Realtime subscriptions for chat messages
+function setupRealtimeSubscriptions(){
+  // Subscribe to new chat messages across all channels
+  sb.channel('chat-global').on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages'},payload=>{
+    const msg=snakeToCamel(payload.new);
+    if(msg.userId===S.user.id)return;// Already added locally
+    const jbId=msg.channel||payload.new.channel;
+    if(!_memChatMsgs[jbId])_memChatMsgs[jbId]=[];
+    const mapped={id:msg.id,userId:msg.userId,text:msg.text,files:msg.files||[],ts:msg.createdAt};
+    // Avoid duplicates
+    if(!_memChatMsgs[jbId].find(m=>m.id===mapped.id)){
+      _memChatMsgs[jbId].push(mapped);
+      // If viewing this chat, re-render
+      if(S.view==='teamchat'||(S.jbId===jbId&&S.jbTab==='chat')){renderMain();}
+    }
+  }).subscribe();
+}
 </script>
 </body>
 </html>
