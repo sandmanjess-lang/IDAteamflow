@@ -2935,11 +2935,12 @@ async function saveAddJobBag(){
   if(!name){toast('Enter job bag name','error');return}
   const sel=[...document.getElementById('jb-members').querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid);
   const jbs=getJobBags();
-  const newJb={id:uid('jb'),clientId,name,description:'',status:'active',members:sel,createdAt:new Date().toISOString(),createdBy:S.user.id,files:[]};
+  const newJb={id:uid('jb'),clientId,name,description:'',status:'active',members:sel,createdAt:new Date().toISOString(),createdBy:S.user.id};
   if(_supabaseOk){
     const inserted=await sbInsert('job_bags',newJb);
     if(inserted)newJb.id=inserted.id;
   }
+  newJb.files=[];
   jbs.push(newJb);
   _memJobBags=jbs;closeModal();renderMain();toast('Job bag created');
 }
@@ -3028,11 +3029,13 @@ async function duplicateJobBag(jbId){
     let n=2;while(jbs.find(j=>j.name===baseName+' Copy '+n))n++;
     newName=baseName+' Copy '+n;
   }
-  const newJb={...src,id:uid('jb'),name:newName,shareToken:null,createdAt:new Date().toISOString()};
+  const {files:_,...srcClean}=src;
+  const newJb={...srcClean,id:uid('jb'),name:newName,shareToken:null,createdAt:new Date().toISOString()};
   if(_supabaseOk){
     const inserted=await sbInsert('job_bags',newJb);
     if(inserted)newJb.id=inserted.id;
   }
+  newJb.files=[];
   jbs.push(newJb);
   _memJobBags=jbs;
   const tasks=getTasks();
