@@ -888,11 +888,14 @@ function dAgo(n){const d=new Date(TODAY);d.setDate(d.getDate()-n);return d.toISO
 function dFwd(n){const d=new Date(TODAY);d.setDate(d.getDate()+n);return d.toISOString().split('T')[0]}
 
 const SEED_USERS=[
-  {id:'u1',name:'Admin User',username:'admin',password:'admin123',role:'admin',color:'#f0a500',targetH:0},
-  {id:'u2',name:'Alice Chen',username:'alice',password:'pass123',role:'member',color:'#a78bfa',targetH:120},
-  {id:'u3',name:'Bob Martinez',username:'bob',password:'pass123',role:'member',color:'#34d399',targetH:120},
-  {id:'u4',name:'Carol Smith',username:'carol',password:'pass123',role:'member',color:'#f472b6',targetH:100},
-  {id:'u5',name:'David Kim',username:'david',password:'pass123',role:'member',color:'#60a5fa',targetH:120},
+  {id:'u1',name:'Admin User',username:'admin',password:'pass123',role:'admin',color:'#f0a500',targetH:0},
+  {id:'u2',name:'Steve Gaitskill',username:'SG',password:'pass123',role:'member',color:'#60a5fa',targetH:100},
+  {id:'u3',name:'Demi de Lange',username:'DD',password:'pass123',role:'member',color:'#34d399',targetH:50},
+  {id:'u4',name:'Kaitlin Fillies',username:'KF',password:'pass123',role:'member',color:'#f472b6',targetH:0},
+  {id:'u5',name:'Alex Moss',username:'AM',password:'pass123',role:'member',color:'#a78bfa',targetH:0},
+  {id:'u6',name:'Gerald Yapp',username:'GY',password:'pass123',role:'member',color:'#2dd4bf',targetH:0},
+  {id:'u7',name:'Bill Coop',username:'BC',password:'pass123',role:'member',color:'#fb923c',targetH:50},
+  {id:'u8',name:'Daluci Whiston',username:'DW',password:'pass123',role:'member',color:'#e879f9',targetH:50},
 ];
 
 const SEED_TASKS=[
