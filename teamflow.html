@@ -360,6 +360,7 @@ html[data-theme="light"]{
 html[data-theme="light"] .sidebar{background:#FFFFFF;border-right:1px solid #E5E7EB;box-shadow:none}
 html[data-theme="light"] .sidebar::before{display:none}
 html[data-theme="light"] .sidebar-header{background:#126ed0;border-bottom:none}
+html[data-theme="light"] .sidebar-header .brand-logo-svg{color:#fff}
 html[data-theme="light"] .sidebar-header .sidebar-logo-sub{color:rgba(255,255,255,0.5)}
 html[data-theme="light"] .sidebar-user{background:#F9FAFB;border-bottom:1px solid #E5E7EB;border-top:1px solid #E5E7EB}
 html[data-theme="light"] .sidebar-footer{border-top:1px solid #E5E7EB;background:#F9FAFB}
@@ -692,6 +693,14 @@ html[data-theme="light"] .ts-log-row:hover td{background:#ecedf0!important}
 .typing-dots span:nth-child(2){animation-delay:.2s}
 .typing-dots span:nth-child(3){animation-delay:.4s}
 @keyframes typingBounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+.emoji-picker-wrap{position:relative;flex-shrink:0}
+.emoji-picker{display:none;position:absolute;bottom:40px;left:0;background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:8px;width:280px;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50}
+.emoji-picker.open{display:block}
+.emoji-picker-cat{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;padding:4px 4px 2px;margin-top:4px}
+.emoji-picker-cat:first-child{margin-top:0}
+.emoji-picker-grid{display:flex;flex-wrap:wrap;gap:2px}
+.emoji-btn{width:32px;height:32px;border:none;background:none;font-size:18px;cursor:pointer;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:background .1s}
+.emoji-btn:hover{background:var(--bg-hover)}
 .chat-input-row{display:flex;gap:10px;align-items:flex-end;padding:12px 0;border-top:1px solid var(--border);margin-top:8px}
 .chat-input{flex:1;background:var(--bg-elevated);border:1px solid var(--border-light);border-radius:var(--radius);padding:10px 14px;color:var(--text-primary);font-family:'Figtree',sans-serif;font-size:13px;outline:none;resize:none;min-height:42px;max-height:120px;transition:border-color .2s}
 .chat-input:focus{border-color:var(--blue)}
@@ -1815,7 +1824,7 @@ function openAddUser(){
         <div class="form-group"><label class="form-label">Role</label><select class="form-select" id="mr"><option value="member">Team Member</option><option value="admin">Administrator</option></select></div>
         <div class="form-group"><label class="form-label">Monthly Target Hours</label><input class="form-input" type="number" id="mth" min="0" step="1" placeholder="e.g. 120" style="font-family:'JetBrains Mono',monospace"></div>
       </div>
-      <div class="form-group"><label class="form-label">Avatar Color</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px" id="cpick">${COLORS.map((c,i)=>`<div class="color-dot${i===1?' selected':''}" style="background:${c};${i===1?'border-color:#fff;box-shadow:0 0 0 2px '+c+';':''}" onclick="pickColor('${c}',this)" title="${c}"></div>`).join('')}</div></div>
+      <div class="form-group"><label class="form-label">Avatar Color</label><div style="display:flex;align-items:center;gap:12px;margin-top:6px"><input type="color" id="mcolor" value="${S.ec||COLORS[1]}" onchange="S.ec=this.value;document.getElementById('mcolor-hex').textContent=this.value" style="width:44px;height:44px;border:none;border-radius:10px;cursor:pointer;padding:0;background:none"><span id="mcolor-hex" style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${S.ec||COLORS[1]}</span></div></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1838,7 +1847,8 @@ function saveAddUser(){
   if(!pw){toast('Enter a password','error');return}
   const users=getUsers();
   if(users.find(u=>u.username===username)){toast('Username taken','error');return}
-  users.push({id:uid('u'),name,username,password:pw,role:document.getElementById('mr').value,color:S.ec||COLORS[0],targetH:parseFloat(document.getElementById('mth').value)||0});
+  const color=document.getElementById('mcolor')?.value||S.ec||COLORS[0];
+  users.push({id:uid('u'),name,username,password:pw,role:document.getElementById('mr').value,color,targetH:parseFloat(document.getElementById('mth').value)||0});
   saveUsers(users);closeModal();renderSidebar();renderMain();refreshLoginChips();toast('User added');
 }
 
@@ -1858,7 +1868,7 @@ function openEditUser(id){
         <div class="form-group"><label class="form-label">Role</label><select class="form-select" id="mr"><option value="member" ${u.role==='member'?'selected':''}>Team Member</option><option value="admin" ${u.role==='admin'?'selected':''}>Administrator</option></select></div>
         <div class="form-group"><label class="form-label">Monthly Target Hours</label><input class="form-input" type="number" id="mth" min="0" step="1" value="${u.targetH||''}" placeholder="e.g. 120" style="font-family:'JetBrains Mono',monospace"></div>
       </div>
-      <div class="form-group"><label class="form-label">Avatar Color</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px" id="cpick">${COLORS.map(c=>`<div class="color-dot${c===u.color?' selected':''}" style="background:${c};${c===u.color?'border-color:#fff;box-shadow:0 0 0 2px '+c+';':''}" onclick="pickColor('${c}',this)" title="${c}"></div>`).join('')}</div></div>
+      <div class="form-group"><label class="form-label">Avatar Color</label><div style="display:flex;align-items:center;gap:12px;margin-top:6px"><input type="color" id="mcolor" value="${u.color||COLORS[0]}" onchange="S.ec=this.value;document.getElementById('mcolor-hex').textContent=this.value" style="width:44px;height:44px;border:none;border-radius:10px;cursor:pointer;padding:0;background:none"><span id="mcolor-hex" style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${u.color||COLORS[0]}</span></div></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2339,6 +2349,10 @@ function renderChatTab(jbId,jb,isMember){
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
         <input type="file" multiple style="display:none" onchange="handleChatFiles(event,'${jbId}')">
       </label>
+      <div class="emoji-picker-wrap">
+        <button class="btn-icon" onclick="toggleEmojiPicker('${jbId}')" title="Emoji" type="button" style="font-size:18px;padding:4px">😊</button>
+        <div class="emoji-picker" id="emoji-pick-${jbId}"></div>
+      </div>
       <textarea class="chat-input" id="chat-inp-${jbId}" placeholder="Type a message..." rows="1" onkeydown="chatKeyDown(event,'${jbId}')" oninput="autoResize(this);setTyping('${jbId}')"></textarea>
       <button class="btn btn-primary btn-sm" onclick="sendChatMsg('${jbId}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -2482,6 +2496,36 @@ function removeChatFile(jbId,idx){
 }
 function chatKeyDown(e,jbId){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMsg(jbId)}}
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
+
+// ===== EMOJI PICKER =====
+const EMOJI_DATA=[
+  ['Smileys',['😀','😂','🤣','😊','😍','🥰','😘','😎','🤩','🥳','😏','😒','😢','😭','😤','🤯','🥺','😱','🤔','🤗','🫡','🙄','😴','🤮','🤡','👻','💀']],
+  ['Hands',['👍','👎','👏','🙌','🤝','✌️','🤞','💪','👋','🫶','🙏','👌','✋','🤙','👊','🫰']],
+  ['Hearts',['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❤️‍🔥','💕','💖','💗','💝']],
+  ['Objects',['🔥','⭐','💡','🎉','🎊','🚀','💰','📌','📎','✅','❌','⚠️','💬','📣','🏆','🎯','📅','⏰','🔒','🔑']],
+  ['Reactions',['👀','💯','🫠','😬','🤷','🤦','💅','🧠','💻','☕','🍕','🍻','🥂']]
+];
+function toggleEmojiPicker(jbId){
+  const el=document.getElementById('emoji-pick-'+jbId);
+  if(!el)return;
+  const isOpen=el.classList.contains('open');
+  // Close all open pickers first
+  document.querySelectorAll('.emoji-picker.open').forEach(p=>p.classList.remove('open'));
+  if(!isOpen){
+    el.innerHTML=EMOJI_DATA.map(([cat,emojis])=>`<div class="emoji-picker-cat">${cat}</div><div class="emoji-picker-grid">${emojis.map(e=>`<button class="emoji-btn" onclick="insertEmoji('${jbId}','${e}')">${e}</button>`).join('')}</div>`).join('');
+    el.classList.add('open');
+  }
+}
+function insertEmoji(jbId,emoji){
+  const inp=document.getElementById('chat-inp-'+jbId);if(!inp)return;
+  const start=inp.selectionStart,end=inp.selectionEnd;
+  inp.value=inp.value.slice(0,start)+emoji+inp.value.slice(end);
+  inp.selectionStart=inp.selectionEnd=start+emoji.length;
+  inp.focus();autoResize(inp);
+  document.querySelectorAll('.emoji-picker.open').forEach(p=>p.classList.remove('open'));
+}
+// Close emoji picker on outside click
+document.addEventListener('click',e=>{if(!e.target.closest('.emoji-picker-wrap'))document.querySelectorAll('.emoji-picker.open').forEach(p=>p.classList.remove('open'))});
 function deleteChatMsg(jbId,msgId){
   const msgs=getChatMsgs(jbId).filter(m=>m.id!==msgId);
   saveChatMsgs(jbId,msgs);
@@ -3071,6 +3115,10 @@ function renderTeamChat(){
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             <input type="file" multiple style="display:none" onchange="handleChatFiles(event,'${TEAM_CHAT_KEY}')">
           </label>
+          <div class="emoji-picker-wrap">
+            <button class="btn-icon" onclick="toggleEmojiPicker('${TEAM_CHAT_KEY}')" title="Emoji" type="button" style="font-size:18px;padding:4px">😊</button>
+            <div class="emoji-picker" id="emoji-pick-${TEAM_CHAT_KEY}"></div>
+          </div>
           <textarea class="tc-textarea" id="chat-inp-${TEAM_CHAT_KEY}" placeholder="Message the team…" rows="1" onkeydown="chatKeyDown(event,'${TEAM_CHAT_KEY}')" oninput="autoResize(this);setTyping('${TEAM_CHAT_KEY}')"></textarea>
           <button class="tc-send-btn" onclick="sendChatMsg('${TEAM_CHAT_KEY}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
