@@ -3419,22 +3419,23 @@ function renderMonthlyLogs(){
   <!-- Target progress -->
   ${isAdmin&&S.mlUid==='all'?`
   <div class="target-grid">
-    ${members.filter(u=>u.targetH>0).map(u=>{
+    ${members.map(u=>{
       const uBillable=days.reduce((s,d)=>s+d.entries.filter(l=>l.userId===u.id).reduce((ss,l)=>ss+(l.billableH||0),0),0);
       const uLogged=days.reduce((s,d)=>s+d.entries.filter(l=>l.userId===u.id).reduce((ss,l)=>ss+l.hours,0),0);
-      const uPct=Math.min(Math.round((uBillable/u.targetH)*100),999);
-      const uColor=uPct>=100?'var(--low)':uPct>=70?'var(--blue)':'var(--accent)';
+      const uTarget=u.targetH||0;
+      const uPct=uTarget>0?Math.min(Math.round((uBillable/uTarget)*100),999):null;
+      const uColor=uPct===null?'var(--text-muted)':uPct>=100?'var(--low)':uPct>=70?'var(--blue)':'var(--accent)';
       return`<div class="target-card" onclick="mlSetUid('${u.id}');renderMain()" style="cursor:pointer">
         <div class="target-card-header">
           <div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:30px;height:30px;font-size:11px;flex-shrink:0">${initials(u.name)}</div>
           <div class="target-card-info">
             <div class="target-card-name">${esc(u.name)}</div>
-            <div class="target-card-sub">${fmtHM(uBillable)} billable · ${fmtHM(uLogged)} logged / ${u.targetH}h</div>
+            <div class="target-card-sub">${fmtHM(uBillable)} billable · ${fmtHM(uLogged)} logged${uTarget>0?' / '+uTarget+'h':''}</div>
           </div>
-          <div class="target-pct" style="color:${uColor}">${uPct}%</div>
+          <div class="target-pct" style="color:${uColor}">${uPct!==null?uPct+'%':'—'}</div>
         </div>
         <div class="target-bar-row">
-          <div class="prog-wrap"><div class="prog-fill${uPct>=100?' prog-over':''}" style="width:${Math.min(uPct,100)}%;background:${uPct<100?u.color:'var(--low)'}"></div></div>
+          <div class="prog-wrap"><div class="prog-fill${uPct!==null&&uPct>=100?' prog-over':''}" style="width:${uPct!==null?Math.min(uPct,100):0}%;background:${uPct===null?'var(--text-muted)':uPct<100?u.color:'var(--low)'}"></div></div>
         </div>
       </div>`;
     }).join('')}
