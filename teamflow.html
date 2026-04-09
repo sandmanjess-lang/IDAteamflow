@@ -2355,8 +2355,9 @@ function renderFileGrid(files,jbId,canEdit){
   if(!files||files.length===0)return'<div style="color:var(--text-muted);font-size:12px">No files attached.</div>';
   return files.map((f,i)=>{
     const isImg=f.type&&f.type.startsWith('image/');
+    const src=f.url||f.data;
     return`<div class="file-thumb" onclick="viewFile('${jbId}',${i})">
-      ${isImg?`<img src="${f.data}" alt="${esc(f.name)}">`:`<div class="file-thumb-doc"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${esc(f.name.split('.').pop().toUpperCase())}</span></div>`}
+      ${isImg?`<img src="${src}" alt="${esc(f.name)}">`:`<div class="file-thumb-doc"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${esc(f.name.split('.').pop().toUpperCase())}</span></div>`}
       <div class="file-thumb-name">${esc(f.name)}</div>
       ${canEdit?`<button class="file-remove" onclick="event.stopPropagation();removeBriefFile('${jbId}',${i})">✕</button>`:''}
     </div>`;
@@ -2378,20 +2379,21 @@ function saveBrief(jbId){
   saveJobBags(jbs);toast('Brief saved');
 }
 
-function handleBriefFiles(e,jbId){
+async function handleBriefFiles(e,jbId){
   const files=[...e.target.files];
   if(!files.length)return;
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
-  let pending=files.length;
-  files.forEach(f=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      jbs[idx].files.push({name:f.name,type:f.type,data:ev.target.result});
-      pending--;
-      if(pending===0){saveJobBags(jbs);const fg=document.getElementById('fg-'+jbId);if(fg)fg.innerHTML=renderFileGrid(jbs[idx].files,jbId,true);toast(files.length+' file'+(files.length>1?'s':'')+' uploaded')}
-    };
-    reader.readAsDataURL(f);
-  });
+  toast('Uploading '+files.length+' file'+(files.length>1?'s':'')+'...');
+  for(const f of files){
+    try{
+      const uploaded=await uploadToFTP(f,'jobbag');
+      jbs[idx].files.push(uploaded);
+    }catch(err){toast('Upload failed: '+f.name,'error');console.error(err);}
+  }
+  saveJobBags(jbs);
+  const fg=document.getElementById('fg-'+jbId);
+  if(fg)fg.innerHTML=renderFileGrid(jbs[idx].files,jbId,true);
+  toast(files.length+' file'+(files.length>1?'s':'')+' uploaded');
   e.target.value='';
 }
 
@@ -2405,15 +2407,33 @@ function removeBriefFile(jbId,idx){
 function viewFile(jbId,idx){
   const jbs=getJobBags();const jb=jbs.find(j=>j.id===jbId);if(!jb)return;
   const f=jb.files[idx];if(!f)return;
+  const src=f.url||f.data;
   if(f.type&&f.type.startsWith('image/')){
-    openModal(`<div class="modal-header"><div class="modal-title">${esc(f.name)}</div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body" style="text-align:center"><img src="${f.data}" style="max-width:100%;border-radius:8px"></div><div class="modal-footer"><a href="${f.data}" download="${esc(f.name)}" class="btn btn-secondary">Download</a><button class="btn btn-primary" style="width:auto" onclick="closeModal()">Close</button></div>`);
+    openModal(`<div class="modal-header"><div class="modal-title">${esc(f.name)}</div><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body" style="text-align:center"><img src="${src}" style="max-width:100%;border-radius:8px"></div><div class="modal-footer"><a href="${src}" download="${esc(f.name)}" class="btn btn-secondary" target="_blank">Download</a><button class="btn btn-primary" style="width:auto" onclick="closeModal()">Close</button></div>`);
   } else {
-    const a=document.createElement('a');a.href=f.data;a.download=f.name;a.click();
+    window.open(src,'_blank');
   }
 }
 
 // ===== CHAT =====
 let _chatFiles={};
+let _uploadQueue=0;
+async function uploadToFTP(file,folder){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      try{
+        _uploadQueue++;
+        const resp=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,fileData:ev.target.result,folder:folder||'chat'})});
+        const data=await resp.json();
+        _uploadQueue--;
+        if(!resp.ok)throw new Error(data.error||'Upload failed');
+        resolve({name:file.name,type:file.type,size:file.size,data:data.url,url:data.url});
+      }catch(err){_uploadQueue--;reject(err);}
+    };
+    reader.readAsDataURL(file);
+  });
+}
 function fmtFileSize(bytes){if(!bytes)return'';if(bytes<1024)return bytes+'B';if(bytes<1048576)return(bytes/1024).toFixed(1)+'KB';return(bytes/1048576).toFixed(1)+'MB'}
 function fileTypeIcon(type){
   if(!type)return'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
@@ -2427,27 +2447,26 @@ function fileTypeIcon(type){
 }
 const DL_ICO='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
 function chatFileHTML(f){
+  const src=f.url||f.data;
   if(f.type&&f.type.startsWith('image/')){
-    return`<div class="chat-img-wrap"><img class="chat-img-preview" src="${f.data}" alt="${esc(f.name)}" onclick="window.open(this.src,'_blank')"><a class="chat-img-dl" href="${f.data}" download="${esc(f.name)}" title="Download ${esc(f.name)}">${DL_ICO}</a></div>`;
+    return`<div class="chat-img-wrap"><img class="chat-img-preview" src="${src}" alt="${esc(f.name)}" onclick="window.open(this.src,'_blank')"><a class="chat-img-dl" href="${src}" download="${esc(f.name)}" title="Download ${esc(f.name)}" target="_blank">${DL_ICO}</a></div>`;
   }
-  return`<a class="chat-file-chip" href="${f.data}" download="${esc(f.name)}" title="Download ${esc(f.name)}"><div class="chat-file-chip-icon">${fileTypeIcon(f.type)}</div><div class="chat-file-chip-info"><div class="chat-file-chip-name">${esc(f.name)}</div>${f.size?`<div class="chat-file-chip-size">${fmtFileSize(f.size)}</div>`:''}</div><span class="chat-file-chip-dl">${DL_ICO}</span></a>`;
+  return`<a class="chat-file-chip" href="${src}" download="${esc(f.name)}" title="Download ${esc(f.name)}" target="_blank"><div class="chat-file-chip-icon">${fileTypeIcon(f.type)}</div><div class="chat-file-chip-info"><div class="chat-file-chip-name">${esc(f.name)}</div>${f.size?`<div class="chat-file-chip-size">${fmtFileSize(f.size)}</div>`:''}</div><span class="chat-file-chip-dl">${DL_ICO}</span></a>`;
 }
-function handleChatFiles(e,jbId){
+async function handleChatFiles(e,jbId){
   const files=[...e.target.files];
   if(!files.length)return;
   const oversized=files.filter(f=>f.size>5*1024*1024);
   if(oversized.length){toast('File too large (max 5MB): '+oversized.map(f=>f.name).join(', '),'error');e.target.value='';return;}
   if(!_chatFiles[jbId])_chatFiles[jbId]=[];
-  let pending=files.length;
-  files.forEach(f=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      _chatFiles[jbId].push({name:f.name,type:f.type,size:f.size,data:ev.target.result});
-      pending--;
-      if(pending===0)renderChatFilePrev(jbId);
-    };
-    reader.readAsDataURL(f);
-  });
+  toast('Uploading '+files.length+' file'+(files.length>1?'s':'')+'...');
+  for(const f of files){
+    try{
+      const uploaded=await uploadToFTP(f,'chat');
+      _chatFiles[jbId].push(uploaded);
+      renderChatFilePrev(jbId);
+    }catch(err){toast('Upload failed: '+f.name,'error');console.error(err);}
+  }
   e.target.value='';
 }
 function renderChatFilePrev(jbId){
