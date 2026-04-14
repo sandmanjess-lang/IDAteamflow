@@ -1026,6 +1026,14 @@ async function fetchAllData(){
     });
     _memJobBags.forEach(jb=>{jb.files=filesMap[jb.id]||jb.files||[];});
     _supabaseOk=true;
+    // Diagnostic: summarise time_logs ownership so cross-user leaks become visible in console
+    try{
+      const byUser={};
+      (_memTimeLogs||[]).forEach(l=>{const k=l.userId||'(null)';byUser[k]=(byUser[k]||0)+1;});
+      const orphaned=(_memTimeLogs||[]).filter(l=>!l.userId||!_memUsers.find(u=>u.id===l.userId));
+      console.log('[time_logs diagnostic] count by user_id:',byUser,'total:',(_memTimeLogs||[]).length);
+      if(orphaned.length)console.warn('[time_logs diagnostic] '+orphaned.length+' log(s) with missing/unknown user_id:',orphaned);
+    }catch(e){}
   }catch(err){
     console.error('Supabase fetch failed, falling back to seeds:',err);
     _supabaseOk=false;
@@ -3334,7 +3342,14 @@ function mlBuildChart(days,maxH,dailyTarget){
 }
 
 function getDayStats(allLogs,dateStr,uid){
-  const dayLogs=allLogs.filter(l=>l.date===dateStr&&(!uid||l.userId===uid));
+  // Normalise to trimmed strings so mismatched types/whitespace can't slip through the filter
+  const uidStr=uid==null?null:String(uid).trim();
+  const dayLogs=allLogs.filter(l=>{
+    if(l.date!==dateStr)return false;
+    if(!uidStr)return true;// all-members view (admin only)
+    const lUid=l.userId==null?'':String(l.userId).trim();
+    return lUid===uidStr;
+  });
   const logged=dayLogs.reduce((s,l)=>s+l.hours,0);
   const billable=dayLogs.reduce((s,l)=>s+(l.billableH||0),0);
   return{logged,billable,variance:billable-logged,entries:dayLogs};
@@ -3564,9 +3579,9 @@ function renderMonthlyLogs(){
             const task=getTasks().find(t=>t.id===log.taskId);
             const lu=allUsers.find(u=>u.id===log.userId);
             const logVar=(log.billableH||0)-log.hours;
-            return`<tr class="ml-entry-row${day.isWeekend?' ml-weekend':''}">
+            return`<tr class="ml-entry-row${day.isWeekend?' ml-weekend':''}" data-log-uid="${esc(log.userId||'')}" data-viewer-uid="${esc(uid||'all')}">
               <td>
-                ${uid===null&&lu?`<span style="font-weight:600;color:${lu.color}">${esc(lu.name)}</span><span style="color:var(--text-muted)"> — </span>`:''}
+                ${lu?`<span style="font-weight:600;color:${lu.color}">${esc(lu.name)}</span><span style="color:var(--text-muted)"> — </span>`:''}
                 ${task?esc(task.title):'Unknown task'}
                 ${log.notes?`<div style="color:var(--text-muted);font-size:11px;margin-top:2px;line-height:1.4;white-space:pre-wrap">${esc(log.notes)}</div>`:''}
               </td>
