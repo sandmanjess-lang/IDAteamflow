@@ -989,7 +989,7 @@ function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 // Synchronous getters — return from cache (populated by fetchAllData)
 function getUsers(){return _memUsers||[]}
 function getTasks(){return _memTasks||[]}
-function getClients(){return _memClients||[]}
+function getClients(){return (_memClients||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'',undefined,{sensitivity:'base'}))}
 function getJobBags(){return _memJobBags||[]}
 function getTimeLogs(){return _memTimeLogs||[]}
 function getChatMsgs(jbId){return _memChatMsgs[jbId]||[]}
