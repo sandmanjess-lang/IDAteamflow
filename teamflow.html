@@ -89,6 +89,9 @@ html,body{height:100%;font-family:'Figtree',sans-serif;background:var(--bg-base)
 .nav-badge{margin-left:auto;background:var(--bg-card);color:var(--text-muted);font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center;font-family:'JetBrains Mono',monospace}
 .nav-item.active .nav-badge{background:var(--blue-mid);color:var(--blue)}
 .sidebar-footer{padding:14px 20px;border-top:1px solid var(--border)}
+.sidebar-clock{padding:8px 12px;margin-bottom:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);text-align:center;font-family:'JetBrains Mono',monospace}
+.sidebar-clock-time{font-size:15px;font-weight:700;color:var(--text-primary);letter-spacing:.02em;line-height:1.2}
+.sidebar-clock-date{font-size:10px;color:var(--text-muted);margin-top:3px;letter-spacing:.04em;text-transform:uppercase}
 .logout-btn{display:flex;align-items:center;gap:8px;padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-muted);cursor:pointer;font-family:'Figtree',sans-serif;font-size:13px;font-weight:500;width:100%;transition:all .2s}
 .logout-btn:hover{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3);color:var(--high)}
 .main-content{flex:1;background:var(--bg-base);min-height:100vh}
@@ -860,6 +863,10 @@ html[data-theme="light"] .ml-totals{background:#ffffff;border-top-color:#e4e8f0}
     </div>
     <nav class="sidebar-nav" id="sb-nav"></nav>
     <div class="sidebar-footer">
+      <div class="sidebar-clock">
+        <div class="sidebar-clock-time" id="sb-clock-time">--:--</div>
+        <div class="sidebar-clock-date" id="sb-clock-date">—</div>
+      </div>
       <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()">
         <svg id="theme-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
         <span id="theme-label">Light Mode</span>
@@ -3691,9 +3698,26 @@ function refreshLoginChips(){
   chipsEl.innerHTML=Object.entries(SEED_EMAILS).map(([email,u])=>`<div class="demo-chip" onclick="fill('${esc(email)}','pass123')"><div class="demo-chip-name">${esc(u.name)}</div><div class="demo-chip-role">${u.role==='admin'?'Administrator':'Member'}</div></div>`).join('');
 }
 
+function updateSidebarClock(){
+  const t=document.getElementById('sb-clock-time');
+  const d=document.getElementById('sb-clock-date');
+  if(!t||!d)return;
+  const now=new Date();
+  const hh=String(now.getHours()).padStart(2,'0');
+  const mm=String(now.getMinutes()).padStart(2,'0');
+  t.textContent=`${hh}:${mm}`;
+  d.textContent=now.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+}
+function startSidebarClock(){
+  updateSidebarClock();
+  if(window._sbClockInt)clearInterval(window._sbClockInt);
+  window._sbClockInt=setInterval(updateSidebarClock,1000);
+}
+
 document.addEventListener('DOMContentLoaded',async()=>{
   if(await initPortal())return;
   initTheme();
+  startSidebarClock();
   refreshLoginChips();
   // Register global handlers
   document.getElementById('lp').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
