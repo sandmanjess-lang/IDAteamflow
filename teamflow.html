@@ -237,6 +237,32 @@ html[data-theme="light"] .badge-client{background:rgba(18,110,208,.1);color:#126
 .badge-due-soon{background:rgba(249,115,22,.1);color:var(--medium)}
 .badge-due-ok{background:rgba(100,116,139,.08);color:var(--text-muted)}
 
+/* ── CONFETTI ── */
+.confetti-wrap{position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden}
+.confetti-piece{position:absolute;top:-16px;width:10px;height:14px;opacity:0;will-change:transform,opacity;border-radius:2px;animation:confettiFall linear forwards}
+@keyframes confettiFall{0%{opacity:0;transform:translate3d(0,-10vh,0) rotate(0deg)}8%{opacity:1}100%{opacity:0;transform:translate3d(var(--dx,0),110vh,0) rotate(var(--rot,540deg))}}
+
+/* ── CHAT @MENTIONS ── */
+.chat-mention{display:inline-block;padding:0 5px;border-radius:4px;background:rgba(18,110,208,.18);color:#60a5fa;font-weight:600}
+.chat-mention.mention-me{background:rgba(234,179,8,.22);color:#facc15}
+html[data-theme="light"] .chat-mention{background:rgba(18,110,208,.14);color:#126ed0}
+html[data-theme="light"] .chat-mention.mention-me{background:rgba(234,179,8,.28);color:#a16207}
+.mention-popup{position:absolute;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.35);padding:4px;min-width:200px;max-height:240px;overflow-y:auto;z-index:100}
+.mention-popup-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text-primary)}
+.mention-popup-item:hover,.mention-popup-item.mention-active{background:var(--bg-elevated)}
+
+/* ── NOTIFICATIONS PANEL ── */
+.nav-badge.nav-badge-unread{background:rgba(239,68,68,.18);color:#ef4444}
+.notif-list{display:flex;flex-direction:column;gap:8px;padding:16px 28px 40px}
+.notif-item{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;transition:all .2s;cursor:pointer}
+.notif-item:hover{border-color:var(--border-light);background:var(--bg-elevated);transform:translateX(2px)}
+.notif-item.unread{border-left:3px solid var(--blue);background:rgba(18,110,208,.05)}
+.notif-item-icon{flex-shrink:0;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(18,110,208,.15);color:#60a5fa}
+.notif-item-body{flex:1;min-width:0}
+.notif-item-title{font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:2px}
+.notif-item-meta{font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px}
+.notif-empty{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:13px}
+
 /* ── TASK LIST ── */
 .task-list{display:flex;flex-direction:column;gap:7px}
 .task-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px;display:flex;align-items:flex-start;gap:11px;transition:all .2s;position:relative;overflow:hidden}
@@ -1190,40 +1216,215 @@ function initPresence(userId){
 // ===== BROWSER NOTIFICATIONS (Supabase) =====
 const NOTIF_KEY='tf_notifs';
 let _seenNotifs=new Set();
+let _allNotifs=[];// in-memory cache of the current user's notifications (read+unread)
 function requestNotifPermission(){
   if('Notification' in window&&Notification.permission==='default'){
     Notification.requestPermission();
   }
 }
-async function pushTaskNotifs(assignees,taskTitle,taskId,jbId){
-  const actors=assignees.filter(id=>id!==S.user.id);
+
+// Unlock audio on first user gesture so notif sound can play later
+let _audioUnlocked=false;
+let _notifAudioCtx=null;
+function unlockAudio(){
+  if(_audioUnlocked)return;
+  try{
+    _notifAudioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    _audioUnlocked=true;
+  }catch(e){}
+}
+document.addEventListener('click',unlockAudio,{once:true});
+document.addEventListener('keydown',unlockAudio,{once:true});
+
+function playNotifSound(){
+  try{
+    if(!_notifAudioCtx)return;
+    const ctx=_notifAudioCtx;
+    const now=ctx.currentTime;
+    // Two-tone chime: G5 then C6
+    [{f:784,t:0},{f:1046,t:0.14}].forEach(({f,t})=>{
+      const o=ctx.createOscillator();
+      const g=ctx.createGain();
+      o.type='sine';o.frequency.value=f;
+      g.gain.setValueAtTime(0,now+t);
+      g.gain.linearRampToValueAtTime(0.18,now+t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001,now+t+0.28);
+      o.connect(g);g.connect(ctx.destination);
+      o.start(now+t);o.stop(now+t+0.3);
+    });
+  }catch(e){}
+}
+
+// Format a notification row into a human-readable summary
+function formatNotifText(n){
+  const kind=n.kind||'task_assigned';
+  const actor=n.assignerName||n.assigner_name||'Someone';
+  const title=n.taskTitle||n.task_title||'';
+  const jb=n.jbName||n.jb_name||'';
+  if(kind==='task_assigned')return actor+' assigned you a task'+(title?': "'+title+'"':'')+(jb?' on '+jb:'');
+  if(kind==='task_removed')return actor+' removed you from a task'+(title?': "'+title+'"':'');
+  if(kind==='jb_added')return actor+' added you to Job Bag "'+jb+'"';
+  if(kind==='mention')return actor+' mentioned you in '+(jb||'Team Chat')+(title?': '+title:'');
+  return title||'Notification';
+}
+
+// Generic notification insert
+async function pushNotif(kind,targetIds,opts){
+  const actors=(targetIds||[]).filter(id=>id&&id!==S.user.id);
   if(!actors.length)return;
   if(!_supabaseOk)return;
-  const jb=jbId?getJobBags().find(j=>j.id===jbId):null;
   const rows=actors.map(targetId=>({
-    target_user_id:targetId,task_id:taskId,task_title:taskTitle,
-    assigner_name:S.user.name,jb_name:jb?jb.name:null,read:false
+    target_user_id:targetId,
+    task_id:opts.taskId||null,
+    task_title:opts.title||null,
+    assigner_name:S.user.name,
+    jb_name:opts.jbName||null,
+    channel:opts.channel||null,
+    kind,
+    read:false
   }));
   const{error}=await sb.from('notifications').insert(rows);
-  if(error)console.error('pushNotifs:',error);
+  if(error)console.error('pushNotif['+kind+']:',error);
 }
+
+// Back-compat wrapper used by existing call sites
+async function pushTaskNotifs(assignees,taskTitle,taskId,jbId){
+  const jb=jbId?getJobBags().find(j=>j.id===jbId):null;
+  return pushNotif('task_assigned',assignees,{taskId,title:taskTitle,jbName:jb?jb.name:null});
+}
+
+async function pushTaskRemovedNotifs(removedIds,taskTitle,taskId){
+  return pushNotif('task_removed',removedIds,{taskId,title:taskTitle});
+}
+
+async function pushJbAddedNotifs(memberIds,jbId,jbName){
+  return pushNotif('jb_added',memberIds,{jbName,taskId:jbId});
+}
+async function fetchAllNotifs(){
+  if(!S.user||!_supabaseOk){_allNotifs=[];return;}
+  try{
+    const{data,error}=await sb.from('notifications').select('*').eq('target_user_id',S.user.id).order('created_at',{ascending:false}).limit(100);
+    if(error){console.error('fetchAllNotifs:',error);return;}
+    _allNotifs=(data||[]).map(snakeToCamel);
+  }catch(e){console.error('fetchAllNotifs:',e);}
+}
+
+function unreadNotifCount(){return _allNotifs.filter(n=>!n.read).length}
+
 async function checkNewNotifs(){
   if(!S.user||!_supabaseOk)return;
-  if(!('Notification' in window)||Notification.permission!=='granted')return;
-  try{
-    const{data}=await sb.from('notifications').select('*').eq('target_user_id',S.user.id).eq('read',false).order('created_at',{ascending:false}).limit(20);
-    if(!data)return;
-    data.forEach(n=>{
-      if(_seenNotifs.has(n.id))return;
-      _seenNotifs.add(n.id);
-      const body=n.assigner_name+' assigned you a task'+(n.jb_name?' on '+n.jb_name:'');
-      new Notification(n.task_title,{body,icon:'/favicon.ico',tag:n.id});
-    });
-    // Mark as read
-    if(data.length){
-      await sb.from('notifications').update({read:true}).in('id',data.map(n=>n.id));
+  await fetchAllNotifs();
+  const unread=_allNotifs.filter(n=>!n.read);
+  unread.forEach(n=>{
+    if(_seenNotifs.has(n.id))return;
+    _seenNotifs.add(n.id);
+    const body=formatNotifText(n);
+    // In-app toast
+    try{toast(body);}catch(e){}
+    // Browser notification (if permission granted)
+    if('Notification' in window&&Notification.permission==='granted'){
+      try{new Notification('TeamFlow',{body,icon:'/favicon.ico',tag:n.id});}catch(e){}
     }
-  }catch(e){console.error('checkNotifs:',e);}
+    playNotifSound();
+  });
+}
+
+async function markNotifRead(id){
+  const n=_allNotifs.find(x=>x.id===id);
+  if(n)n.read=true;
+  if(_supabaseOk)sb.from('notifications').update({read:true}).eq('id',id).then(()=>{});
+}
+async function markAllNotifsRead(){
+  const unread=_allNotifs.filter(n=>!n.read);
+  if(!unread.length)return;
+  unread.forEach(n=>{n.read=true});
+  if(_supabaseOk){
+    await sb.from('notifications').update({read:true}).in('id',unread.map(n=>n.id));
+  }
+  renderSidebar();renderMain();
+}
+async function deleteAllNotifs(){
+  if(!confirm('Clear all notifications?'))return;
+  const ids=_allNotifs.map(n=>n.id);
+  _allNotifs=[];
+  if(_supabaseOk&&ids.length){
+    await sb.from('notifications').delete().in('id',ids);
+  }
+  renderSidebar();renderMain();
+}
+
+function notifClick(id,kind,taskId,channel){
+  markNotifRead(id);
+  if(kind==='mention'&&channel){
+    if(channel==='team'){S.view='teamchat';S.jbId=null;}
+    else{S.view='jobbags';S.jbId=channel;S.jbTab='chat';}
+    renderSidebar();renderMain();
+    return;
+  }
+  if(kind==='jb_added'&&taskId){
+    S.view='jobbags';S.jbId=taskId;S.jbTab='timesheet';
+    renderSidebar();renderMain();
+    return;
+  }
+  if((kind==='task_assigned'||kind==='task_removed')&&taskId){
+    const t=getTasks().find(x=>x.id===taskId);
+    if(t&&t.jobBagId){
+      openJobBag(t.jobBagId,taskId);
+    }else{
+      S.view='tasks';renderSidebar();renderMain();
+    }
+    return;
+  }
+  // Fallback — go to notifications list stays put
+}
+
+function fmtNotifWhen(iso){
+  const d=new Date(iso);
+  const diff=(Date.now()-d.getTime())/1000;
+  if(diff<60)return 'just now';
+  if(diff<3600)return Math.floor(diff/60)+'m ago';
+  if(diff<86400)return Math.floor(diff/3600)+'h ago';
+  if(diff<604800)return Math.floor(diff/86400)+'d ago';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+}
+
+function renderNotifications(){
+  const notifs=_allNotifs||[];
+  const unread=notifs.filter(n=>!n.read).length;
+  return`
+  <div class="page-header">
+    <div>
+      <div class="page-title">Notifications</div>
+      <div class="page-subtitle">${notifs.length===0?'No activity yet':unread+' unread · '+notifs.length+' total'}</div>
+    </div>
+    <div class="header-actions">
+      ${unread>0?`<button class="btn btn-secondary btn-sm" onclick="markAllNotifsRead()">Mark all as read</button>`:''}
+      ${notifs.length>0?`<button class="btn btn-secondary btn-sm" onclick="deleteAllNotifs()">Clear all</button>`:''}
+    </div>
+  </div>
+  ${notifs.length===0
+    ?`<div class="notif-empty">You're all caught up! Notifications will appear here when someone assigns you a task, mentions you, or adds you to a job bag.</div>`
+    :`<div class="notif-list">
+      ${notifs.map(n=>{
+        const kind=n.kind||'task_assigned';
+        const iconSvg=kind==='mention'
+          ?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg>'
+          :kind==='jb_added'
+          ?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>'
+          :kind==='task_removed'
+          ?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+          :'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        const body=esc(formatNotifText(n));
+        const when=n.createdAt?fmtNotifWhen(n.createdAt):'';
+        return`<div class="notif-item${n.read?'':' unread'}" onclick="notifClick('${n.id}','${kind}','${n.taskId||''}','${n.channel||''}')">
+          <div class="notif-item-icon">${iconSvg}</div>
+          <div class="notif-item-body">
+            <div class="notif-item-title">${body}</div>
+            <div class="notif-item-meta">${when}${n.read?'':' · <span style="color:var(--blue);font-weight:600">NEW</span>'}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`}`;
 }
 
 // ===== TYPING INDICATOR (Supabase Broadcast) =====
@@ -1330,9 +1531,9 @@ async function doLogin(){
     user.email=email;
     S.user=user;S.view='tasks';S.tv='list';S.fp='all';S.fs='all';
     await fetchAllData();
+    await fetchAllNotifs();
     initPresence(user.id);
     try{requestNotifPermission();}catch(e){}
-    try{checkNewNotifs();}catch(e){}
     document.getElementById('login-page').style.display='none';
     const app=document.getElementById('app');
     app.style.removeProperty('display');
@@ -1356,7 +1557,7 @@ async function doLogout(){
   S.view='tasks';S.tv='list';S.fp='all';S.fs='all';S.ec=null;
   S.jbTab='timesheet';S.jbId=null;S.clientId=null;
   S.mlYear=null;S.mlMonth=null;S.mlUid=null;S.mlExpanded=null;
-  _seenNotifs=new Set();
+  _seenNotifs=new Set();_allNotifs=[];
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('lu').value='';document.getElementById('lp').value='';
@@ -1391,6 +1592,9 @@ function renderSidebar(){
     <div class="nav-item ${S.view==='monthlylogs'?'active':''}" onclick="sv('monthlylogs')">
       ${ico('chart')} Monthly Logs
     </div>
+    <div class="nav-item ${S.view==='notifications'?'active':''}" onclick="sv('notifications')">
+      ${ico('bell')} Notifications${unreadNotifCount()>0?` <span class="nav-badge nav-badge-unread">${unreadNotifCount()}</span>`:''}
+    </div>
     <div class="nav-section-label" style="margin-top:6px">Admin</div>
     <div class="nav-item ${S.view==='users'?'active':''}" onclick="sv('users')">
       ${ico('user')} Users <span class="nav-badge">${getUsers().length}</span>
@@ -1415,6 +1619,9 @@ function renderSidebar(){
     </div>
     <div class="nav-item ${S.view==='monthlylogs'?'active':''}" onclick="sv('monthlylogs')">
       ${ico('chart')} Monthly Logs
+    </div>
+    <div class="nav-item ${S.view==='notifications'?'active':''}" onclick="sv('notifications')">
+      ${ico('bell')} Notifications${unreadNotifCount()>0?` <span class="nav-badge nav-badge-unread">${unreadNotifCount()}</span>`:''}
     </div>`;
   }
   document.getElementById('sb-nav').innerHTML=nav;
@@ -1430,6 +1637,7 @@ function ico(k){
     client:'<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>',
     chart:'<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',
     chat:'<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    bell:'<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
   };return m[k]||'';
 }
 
@@ -1446,6 +1654,7 @@ async function renderMain(){
   else if(S.view==='clients')m.innerHTML=renderClientsPage();
   else if(S.view==='monthlylogs')m.innerHTML=renderMonthlyLogs();
   else if(S.view==='teamchat')m.innerHTML=renderTeamChat();
+  else if(S.view==='notifications')m.innerHTML=renderNotifications();
 }
 
 // ===== TASKS PAGE =====
@@ -1840,7 +2049,7 @@ function openAddTask(preAssign,preJbId){
         <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="ms"><option value="todo" selected>To Do</option><option value="inprogress">In Progress</option><option value="done">Done</option></select></div>
       </div>
       <div class="form-group"><label class="form-label">Due Date</label>${dpHTML('mdd',dFwd2(0))}</div>
-      ${isAdmin?`<div class="form-group"><label class="form-label">Assign To</label><div class="assignee-grid" id="ag">${members.map(u=>`<div class="assignee-chip ${preSelected.includes(u.id)?'selected':''}" onclick="this.classList.toggle('selected')" data-uid="${u.id}"><div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div><div class="assignee-chip-name">${esc(u.name)}</div></div>`).join('')}</div></div>`:''}
+      <div class="form-group"><label class="form-label">Assign To</label><div class="assignee-grid" id="ag">${members.map(u=>`<div class="assignee-chip ${preSelected.includes(u.id)?'selected':''}" onclick="this.classList.toggle('selected')" data-uid="${u.id}"><div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div><div class="assignee-chip-name">${esc(u.name)}</div></div>`).join('')}</div></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1865,14 +2074,11 @@ function onClientChange(clientId){
 async function saveAddTask(){
   const description=document.getElementById('md').value.trim();
   if(!description){toast('Please enter a description','error');return}
-  const isAdmin=S.user.role==='admin';
   const isReminder=document.getElementById('is-reminder')?.checked||false;
-  let assignees;
-  if(isAdmin){
-    const ag=document.getElementById('ag');
-    const sel=ag?[...ag.querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid):[];
-    assignees=sel.length?sel:[S.user.id];
-  } else {assignees=[S.user.id]}
+  const ag=document.getElementById('ag');
+  const sel=ag?[...ag.querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid):[];
+  // Any user can assign tasks; default to self when nothing selected
+  const assignees=sel.length?sel:[S.user.id];
   const jobBagId=isReminder?null:(document.getElementById('mt-jb')?.value||null)||null;
   const bhVal=document.getElementById('mt-bh')?.value;
   const billableH=isReminder?null:(bhVal&&bhVal!==''?parseFloat(bhVal):null);
@@ -1941,7 +2147,7 @@ function openEditTask(id){
         <div class="form-group"><label class="form-label">Due Date</label>${dpHTML('mdd',t.dueDate||'')}</div>
         ${!t.isReminder&&t.jobBagId?`<div class="form-group"><label class="form-label">Billable Hours <span style="color:var(--text-muted);font-size:10px">(quoted)</span></label><select class="form-select" id="mt-bh" style="font-family:'JetBrains Mono',monospace">${taskTimeOptions(t.billableH||0)}</select></div>`:''}
       </div>
-      ${isAdmin?`<div class="form-group"><label class="form-label">Assigned To</label><div class="assignee-grid" id="ag">${members.map(u=>`<div class="assignee-chip ${t.assignees.includes(u.id)?'selected':''}" onclick="this.classList.toggle('selected')" data-uid="${u.id}"><div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div><div class="assignee-chip-name">${esc(u.name)}</div></div>`).join('')}</div></div>`:''}
+      <div class="form-group"><label class="form-label">Assigned To</label><div class="assignee-grid" id="ag">${members.map(u=>`<div class="assignee-chip ${t.assignees.includes(u.id)?'selected':''}" onclick="this.classList.toggle('selected')" data-uid="${u.id}"><div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div><div class="assignee-chip-name">${esc(u.name)}</div></div>`).join('')}</div></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-danger" onclick="delTask('${t.id}')">Delete</button>
@@ -1956,10 +2162,10 @@ function openEditTask(id){
 async function saveEditTask(id){
   const description=document.getElementById('md').value.trim();
   if(!description){toast('Please enter a description','error');return}
-  const isAdmin=S.user.role==='admin';
   const tasks=getTasks();const idx=tasks.findIndex(t=>t.id===id);if(idx===-1)return;
   let assignees=tasks[idx].assignees;
-  if(isAdmin){const ag=document.getElementById('ag');if(ag){const sel=[...ag.querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid);if(sel.length)assignees=sel}}
+  const ag=document.getElementById('ag');
+  if(ag){const sel=[...ag.querySelectorAll('.assignee-chip.selected')].map(e=>e.dataset.uid);if(sel.length)assignees=sel}
   const bhEl=document.getElementById('mt-bh');
   const billableH=bhEl?(bhEl.value?parseFloat(bhEl.value):null):tasks[idx].billableH;
   const wasNotQuoted=!tasks[idx].billableH;
@@ -1978,11 +2184,15 @@ async function saveEditTask(id){
   const priority=document.getElementById('mp').value;
   const status=document.getElementById('ms').value;
   const dueDate=document.getElementById('mdd').value||null;
+  const wasDone=tasks[idx].status==='done';
   tasks[idx]={...tasks[idx],title:description,description,priority,status,dueDate,assignees,billableH};
   _memTasks=tasks;
   if(_supabaseOk)sbUpdate('tasks',id,{title:description,description,priority,status,dueDate,assignees,billableH});
   const newlyAssigned=assignees.filter(aid=>!prevAssignees.includes(aid));
+  const removed=prevAssignees.filter(aid=>!assignees.includes(aid));
   if(newlyAssigned.length)pushTaskNotifs(newlyAssigned,description,id,tasks[idx].jobBagId||null);
+  if(removed.length)pushTaskRemovedNotifs(removed,description,id);
+  if(!wasDone&&status==='done')launchConfetti();
   closeModal();renderSidebar();renderMain();if(!wasNotQuoted||!isNowQuoted)toast('Task updated');
 }
 
@@ -2090,10 +2300,40 @@ async function saveEditUser(id){
 // ===== ACTIONS =====
 async function toggleDone(id){
   const tasks=getTasks();const t=tasks.find(x=>x.id===id);if(!t)return;
+  const becameDone=t.status!=='done';
   t.status=t.status==='done'?'todo':'done';
   _memTasks=tasks;
   if(_supabaseOk)sbUpdate('tasks',id,{status:t.status});
+  if(becameDone)launchConfetti();
   renderSidebar();renderMain();
+}
+
+function launchConfetti(){
+  const wrap=document.createElement('div');
+  wrap.className='confetti-wrap';
+  const colors=['#f0a500','#a78bfa','#34d399','#f472b6','#60a5fa','#fb923c','#38bdf8','#c084fc','#e879f9','#2dd4bf'];
+  const N=70;
+  for(let i=0;i<N;i++){
+    const p=document.createElement('div');
+    p.className='confetti-piece';
+    const left=Math.random()*100;
+    const dx=(Math.random()*2-1)*300;// horizontal drift up to ±300px
+    const rot=(Math.random()*1080)-360;
+    const delay=Math.random()*0.25;
+    const dur=1.6+Math.random()*1.4;
+    const size=6+Math.random()*10;
+    p.style.left=left+'vw';
+    p.style.width=size+'px';
+    p.style.height=(size*1.4)+'px';
+    p.style.background=colors[i%colors.length];
+    p.style.setProperty('--dx',dx+'px');
+    p.style.setProperty('--rot',rot+'deg');
+    p.style.animationDelay=delay+'s';
+    p.style.animationDuration=dur+'s';
+    wrap.appendChild(p);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(()=>wrap.remove(),3500);
 }
 
 async function delTask(id){
@@ -2544,7 +2784,7 @@ function renderChatTab(jbId,jb,isMember){
           ${!isMine?`<div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:30px;height:30px;font-size:11px;flex-shrink:0">${initials(u.name)}</div>`:''}
           <div class="chat-msg-inner">
             <div class="chat-bubble">
-              ${msg.text?`<div>${esc(msg.text)}</div>`:''}
+              ${msg.text?`<div>${renderMentions(msg.text)}</div>`:''}
               ${(msg.files||[]).map(f=>chatFileHTML(f)).join('')}
             </div>
             <div class="chat-meta">
@@ -2568,7 +2808,7 @@ function renderChatTab(jbId,jb,isMember){
         <button class="btn-icon" onclick="toggleEmojiPicker('${jbId}')" title="Emoji" type="button" style="font-size:18px;padding:4px">😊</button>
         <div class="emoji-picker" id="emoji-pick-${jbId}"></div>
       </div>
-      <textarea class="chat-input" id="chat-inp-${jbId}" placeholder="Type a message..." rows="1" onkeydown="chatKeyDown(event,'${jbId}')" oninput="autoResize(this);setTyping('${jbId}')"></textarea>
+      <textarea class="chat-input" id="chat-inp-${jbId}" placeholder="Type a message… Use @ to mention someone" rows="1" onkeydown="chatKeyDown(event,'${jbId}')" oninput="autoResize(this);setTyping('${jbId}')" onkeyup="onChatKeyupMention(event,'${jbId}')" onblur="setTimeout(closeMentionPopup,150)"></textarea>
       <button class="btn btn-primary btn-sm" onclick="sendChatMsg('${jbId}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
       </button>
@@ -2744,7 +2984,10 @@ function removeChatFile(jbId,idx){
   if(_chatFiles[jbId])_chatFiles[jbId].splice(idx,1);
   renderChatFilePrev(jbId);
 }
-function chatKeyDown(e,jbId){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMsg(jbId)}}
+function chatKeyDown(e,jbId){
+  if(mentionKeyHandle(e))return;
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMsg(jbId)}
+}
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px'}
 
 // ===== EMOJI PICKER =====
@@ -2782,6 +3025,47 @@ async function deleteChatMsg(jbId,msgId){
   const el=document.getElementById('cmsg-'+msgId);
   if(el)el.remove();
 }
+// Resolve @mentions in text -> list of user ids whose name matches
+function resolveMentions(text){
+  if(!text)return[];
+  const users=getUsers();
+  const matched=new Set();
+  // Match @Name — allow up to 3 words, stop at punctuation
+  const re=/@([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*){0,2})/g;
+  let m;
+  while((m=re.exec(text))!==null){
+    const token=m[1].trim().toLowerCase();
+    // Try longest match first: full name, then first two words, then first word
+    const candidates=users.filter(u=>{
+      const n=(u.name||'').toLowerCase();
+      const first=n.split(' ')[0];
+      return n===token||n.startsWith(token+' ')||first===token||token.startsWith(first+' ');
+    });
+    // Prefer exact full-name match
+    const exact=candidates.find(u=>u.name.toLowerCase()===token);
+    const pick=exact||candidates[0];
+    if(pick&&pick.id!==S.user.id)matched.add(pick.id);
+  }
+  return[...matched];
+}
+
+// Render @mentions as highlighted spans. Highlights "me" if the current user is mentioned.
+function renderMentions(text){
+  if(!text)return'';
+  const users=getUsers();
+  const safe=esc(text);
+  return safe.replace(/@([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*){0,2})/g,(full,name)=>{
+    const token=name.trim().toLowerCase();
+    const u=users.find(x=>{
+      const n=(x.name||'').toLowerCase();
+      return n===token||n.split(' ')[0]===token||n.startsWith(token+' ');
+    });
+    if(!u)return full;
+    const mine=u.id===S.user.id?' mention-me':'';
+    return`<span class="chat-mention${mine}">@${esc(u.name)}</span>`;
+  });
+}
+
 async function sendChatMsg(jbId){
   const inp=document.getElementById('chat-inp-'+jbId);if(!inp)return;
   const text=inp.value.trim();
@@ -2796,10 +3080,84 @@ async function sendChatMsg(jbId){
   }
   if(!_memChatMsgs[jbId])_memChatMsgs[jbId]=[];
   _memChatMsgs[jbId].push(newMsg);
+  // Send mention notifications
+  const mentioned=resolveMentions(text);
+  if(mentioned.length){
+    const jb=jbId===TEAM_CHAT_KEY?null:getJobBags().find(j=>j.id===jbId);
+    const jbName=jb?jb.name:(jbId===TEAM_CHAT_KEY?'Team Chat':null);
+    const preview=text.length>80?text.slice(0,80)+'…':text;
+    pushNotif('mention',mentioned,{title:preview,jbName,channel:jbId});
+  }
   inp.value='';inp.style.height='auto';
   _chatFiles[jbId]=[];
   renderChatFilePrev(jbId);
+  closeMentionPopup();
   if(jbId===TEAM_CHAT_KEY){renderMain();}else{S.jbTab='chat';renderMain();}
+}
+
+// ===== MENTION AUTOCOMPLETE =====
+let _mentionCtx=null;// {jbId, start, query}
+function closeMentionPopup(){
+  const el=document.getElementById('mention-popup');
+  if(el)el.remove();
+  _mentionCtx=null;
+}
+function onChatKeyupMention(e,jbId){
+  const inp=e.target;
+  const val=inp.value;
+  const pos=inp.selectionStart||0;
+  // Find most recent "@" before cursor not preceded by word char
+  let at=-1;
+  for(let i=pos-1;i>=0;i--){
+    const c=val[i];
+    if(c==='@'){if(i===0||/\s/.test(val[i-1])){at=i}break}
+    if(/\s/.test(c))break;
+  }
+  if(at===-1){closeMentionPopup();return}
+  const query=val.slice(at+1,pos).toLowerCase();
+  if(query.length>30){closeMentionPopup();return}
+  const users=getUsers().filter(u=>u.id!==S.user.id);
+  const matches=users.filter(u=>{
+    const n=u.name.toLowerCase();
+    return query===''||n.includes(query)||n.split(' ').some(w=>w.startsWith(query));
+  }).slice(0,6);
+  if(!matches.length){closeMentionPopup();return}
+  _mentionCtx={jbId,start:at,end:pos,matches,activeIdx:0};
+  showMentionPopup(inp);
+}
+function showMentionPopup(inp){
+  let el=document.getElementById('mention-popup');
+  if(!el){el=document.createElement('div');el.id='mention-popup';el.className='mention-popup';document.body.appendChild(el);}
+  const rect=inp.getBoundingClientRect();
+  el.style.left=rect.left+'px';
+  el.style.top=(rect.top-Math.min(240,_mentionCtx.matches.length*34+8))+'px';
+  el.innerHTML=_mentionCtx.matches.map((u,i)=>`
+    <div class="mention-popup-item${i===_mentionCtx.activeIdx?' mention-active':''}" data-idx="${i}" onclick="pickMention(${i})">
+      <div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div>
+      <span>${esc(u.name)}</span>
+    </div>`).join('');
+}
+function pickMention(idx){
+  if(!_mentionCtx)return;
+  const u=_mentionCtx.matches[idx];if(!u)return;
+  const inp=document.getElementById('chat-inp-'+_mentionCtx.jbId);if(!inp)return;
+  const before=inp.value.slice(0,_mentionCtx.start);
+  const after=inp.value.slice(_mentionCtx.end);
+  const insert='@'+u.name+' ';
+  inp.value=before+insert+after;
+  const newPos=(before+insert).length;
+  inp.focus();
+  inp.setSelectionRange(newPos,newPos);
+  closeMentionPopup();
+}
+function mentionKeyHandle(e){
+  if(!_mentionCtx)return false;
+  const n=_mentionCtx.matches.length;
+  if(e.key==='ArrowDown'){e.preventDefault();_mentionCtx.activeIdx=(_mentionCtx.activeIdx+1)%n;showMentionPopup(e.target);return true}
+  if(e.key==='ArrowUp'){e.preventDefault();_mentionCtx.activeIdx=(_mentionCtx.activeIdx-1+n)%n;showMentionPopup(e.target);return true}
+  if(e.key==='Enter'||e.key==='Tab'){e.preventDefault();pickMention(_mentionCtx.activeIdx);return true}
+  if(e.key==='Escape'){closeMentionPopup();return true}
+  return false;
 }
 
 // ===== LOG TIME =====
@@ -3018,7 +3376,9 @@ async function saveAddJobBag(){
   }
   newJb.files=[];
   jbs.push(newJb);
-  _memJobBags=jbs;closeModal();renderMain();toast('Job bag created');
+  _memJobBags=jbs;
+  if(sel.length)pushJbAddedNotifs(sel,newJb.id,name);
+  closeModal();renderMain();toast('Job bag created');
 }
 function openEditJobBag(jbId){
   const jb=getJobBags().find(j=>j.id===jbId);if(!jb)return;
@@ -3072,9 +3432,12 @@ async function saveEditJobBag(jbId){
   const invoice=document.getElementById('jb-inv').value.trim();
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
   const showTimeToClient=!!document.getElementById('jb-show-time')?.checked;
+  const prevMembers=jbs[idx].members||[];
+  const newlyAdded=sel.filter(id=>!prevMembers.includes(id));
   jbs[idx]={...jbs[idx],clientId,name,members:sel,poNumber:poNumber||null,estimate:estimate||null,invoice:invoice||null,showTimeToClient};
   _memJobBags=jbs;
   if(_supabaseOk)sbUpdate('job_bags',jbId,{clientId,name,members:sel,poNumber:poNumber||null,estimate:estimate||null,invoice:invoice||null,showTimeToClient});
+  if(newlyAdded.length)pushJbAddedNotifs(newlyAdded,jbId,name);
   closeModal();renderMain();toast('Job bag updated');
 }
 // ===== SHARE LINKS & DUPLICATE =====
@@ -3396,7 +3759,7 @@ function renderTeamChat(){
               <div class="tc-msg-col" style="position:relative">
                 ${!isMine&&!grouped?`<div class="tc-sender" style="color:${u.color}">${esc(u.name)}</div>`:''}
                 <div class="tc-bubble" style="${isMine?'':'background:'+u.color+'0d;border-color:'+u.color+'22'}">
-                  ${msg.text?esc(msg.text):''}
+                  ${msg.text?renderMentions(msg.text):''}
                   ${(msg.files||[]).map(f=>chatFileHTML(f)).join('')}
                 </div>
                 ${isLastInGroup?`<div class="tc-time">${fmtTime(msg.ts)}</div>`:''}
@@ -3419,7 +3782,7 @@ function renderTeamChat(){
             <button class="btn-icon" onclick="toggleEmojiPicker('${TEAM_CHAT_KEY}')" title="Emoji" type="button" style="font-size:18px;padding:4px">😊</button>
             <div class="emoji-picker" id="emoji-pick-${TEAM_CHAT_KEY}"></div>
           </div>
-          <textarea class="tc-textarea" id="chat-inp-${TEAM_CHAT_KEY}" placeholder="Message the team…" rows="1" onkeydown="chatKeyDown(event,'${TEAM_CHAT_KEY}')" oninput="autoResize(this);setTyping('${TEAM_CHAT_KEY}')"></textarea>
+          <textarea class="tc-textarea" id="chat-inp-${TEAM_CHAT_KEY}" placeholder="Message the team… Use @ to mention someone" rows="1" onkeydown="chatKeyDown(event,'${TEAM_CHAT_KEY}')" oninput="autoResize(this);setTyping('${TEAM_CHAT_KEY}')" onkeyup="onChatKeyupMention(event,'${TEAM_CHAT_KEY}')" onblur="setTimeout(closeMentionPopup,150)"></textarea>
           <button class="tc-send-btn" onclick="sendChatMsg('${TEAM_CHAT_KEY}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
@@ -3816,9 +4179,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
         user.email=session.user.email;
         S.user=user;S.view='tasks';S.tv='list';S.fp='all';S.fs='all';
         await fetchAllData();
+        await fetchAllNotifs();
         initPresence(user.id);
         try{requestNotifPermission();}catch(e){}
-        try{checkNewNotifs();}catch(e){}
         document.getElementById('login-page').style.display='none';
         const app=document.getElementById('app');
         app.style.removeProperty('display');
@@ -3850,18 +4213,20 @@ function setupRealtimeSubscriptions(){
 
   // Subscribe to notifications targeted at the current user
   sb.channel('notifs-'+S.user.id).on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'target_user_id=eq.'+S.user.id},payload=>{
-    const n=payload.new;
-    if(_seenNotifs.has(n.id))return;
-    _seenNotifs.add(n.id);
-    const body=(n.assigner_name||'Someone')+' assigned you a task'+(n.jb_name?' on '+n.jb_name:'');
-    // In-app toast
+    const raw=payload.new;
+    if(_seenNotifs.has(raw.id))return;
+    _seenNotifs.add(raw.id);
+    const n=snakeToCamel(raw);
+    // Add to in-memory cache so panel and badge update
+    if(!_allNotifs.find(x=>x.id===n.id))_allNotifs.unshift(n);
+    const body=formatNotifText(n);
     try{toast(body);}catch(e){}
-    // Browser notification (if permission granted)
     if('Notification' in window&&Notification.permission==='granted'){
-      try{new Notification(n.task_title||'New task',{body,icon:'/favicon.ico',tag:n.id});}catch(e){}
+      try{new Notification('TeamFlow',{body,icon:'/favicon.ico',tag:n.id});}catch(e){}
     }
-    // Mark as read so we don't re-notify on next login
-    sb.from('notifications').update({read:true}).eq('id',n.id).then(()=>{});
+    playNotifSound();
+    renderSidebar();
+    if(S.view==='notifications')renderMain();
   }).subscribe();
 
   // Subscribe to task changes so new/updated assignments appear live
