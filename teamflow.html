@@ -1343,6 +1343,12 @@ async function doLogout(){
   await sb.auth.signOut();
   S.user=null;
   _memUsers=null;_memTasks=null;_memClients=null;_memJobBags=null;_memTimeLogs=null;
+  _memChatMsgs={};
+  // Reset per-user UI state so next login doesn't see previous user's selections
+  S.view='tasks';S.tv='list';S.fp='all';S.fs='all';S.ec=null;
+  S.jbTab='timesheet';S.jbId=null;S.clientId=null;
+  S.mlYear=null;S.mlMonth=null;S.mlUid=null;S.mlExpanded=null;
+  _seenNotifs=new Set();
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('lu').value='';document.getElementById('lp').value='';
@@ -3427,14 +3433,16 @@ function renderMonthlyLogs(){
   if(S.mlMonth===null)S.mlMonth=TODAY.getMonth();
   if(!S.mlExpanded)S.mlExpanded={};
   if(S.mlUid===null)S.mlUid=isAdmin?'all':S.user.id;
+  // Non-admins can ONLY see their own data, regardless of any carried-over selection
+  if(!isAdmin)S.mlUid=S.user.id;
 
   const year=S.mlYear,month=S.mlMonth;
   const allLogs=getTimeLogs();
   const allUsers=getUsers();
   const members=allUsers.filter(u=>u.role==='member');
 
-  // uid to filter logs — null means all users
-  const uid=(isAdmin&&S.mlUid==='all')?null:S.mlUid||S.user.id;
+  // uid to filter logs — null means all users (admin only)
+  const uid=isAdmin?(S.mlUid==='all'?null:S.mlUid):S.user.id;
   const viewUser=uid?allUsers.find(u=>u.id===uid):null;
 
   // Build day stats for every day of the month
