@@ -2463,10 +2463,12 @@ function renderBriefTab(jbId,jb,isMember){
         <div class="rte-sep"></div>
         <button class="rte-btn" onclick="rteCmd('insertUnorderedList')" title="Bullet list">• List</button>
         <button class="rte-btn" onclick="rteCmd('insertOrderedList')" title="Numbered list">1. List</button>
-        <div class="rte-sep"></div>
-        <button class="rte-btn" onclick="saveBrief('${jbId}')" style="color:var(--blue)">Save</button>
       </div>
-      <div class="rte-editor" id="rte-${jbId}" contenteditable="true" data-placeholder="Write your project brief here...">${jb.description||''}</div>
+      <div class="rte-editor" id="rte-${jbId}" contenteditable="true" data-placeholder="Write your project brief here..." oninput="markBriefDirty('${jbId}')">${jb.description||''}</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin:-12px 0 24px;align-items:center">
+      <span id="brief-status-${jbId}" style="font-size:12px;color:var(--text-muted)"></span>
+      <button class="btn btn-primary" style="width:auto;padding:0 20px;height:34px;border-radius:9999px;background:#126ed0;border:none" onclick="saveBrief('${jbId}')">Save Brief</button>
     </div>`:`
     <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:24px;min-height:100px;font-size:14px;line-height:1.7;color:var(--text-primary)">
       ${jb.description||'<span style="color:var(--text-muted)">No brief added yet.</span>'}
@@ -2561,12 +2563,28 @@ async function openJobBag(jbId){S.jbId=jbId;S.jbTab='timesheet';if(_supabaseOk&&
 
 function rteCmd(cmd,val){document.execCommand(cmd,false,val||null);document.getElementById('rte-'+S.jbId)?.focus()}
 
+function markBriefDirty(jbId){
+  const s=document.getElementById('brief-status-'+jbId);
+  if(s)s.textContent='Unsaved changes';
+}
 async function saveBrief(jbId){
   const el=document.getElementById('rte-'+jbId);if(!el)return;
   const jbs=getJobBags();const idx=jbs.findIndex(j=>j.id===jbId);if(idx===-1)return;
-  jbs[idx].description=el.innerHTML;
+  const html=el.innerHTML;
+  const s=document.getElementById('brief-status-'+jbId);
+  if(s)s.textContent='Saving…';
+  jbs[idx].description=html;
   _memJobBags=jbs;
-  if(_supabaseOk)sbUpdate('job_bags',jbId,{description:el.innerHTML});
+  if(_supabaseOk){
+    const{error}=await sb.from('job_bags').update({description:html}).eq('id',jbId);
+    if(error){
+      console.error('saveBrief:',error);
+      if(s)s.textContent='Save failed';
+      toast('Save failed: '+error.message,'error');
+      return;
+    }
+  }
+  if(s)s.textContent='Saved';
   toast('Brief saved');
 }
 
