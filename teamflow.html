@@ -227,6 +227,8 @@ html,body{height:100%;font-family:'Figtree',sans-serif;background:var(--bg-base)
 .badge-status-done{background:rgba(34,197,94,.1);color:#4ade80}
 .badge-client{background:rgba(18,110,208,.12);color:#60a5fa;text-transform:none;letter-spacing:0}
 html[data-theme="light"] .badge-client{background:rgba(18,110,208,.1);color:#126ed0}
+@keyframes taskRowPulse{0%{background:rgba(18,110,208,.28)}100%{background:transparent}}
+.ts-task-row.task-row-highlight>td{animation:taskRowPulse 2s ease-out}
 .badge-age-fresh{background:rgba(34,197,94,.1);color:#22c55e}
 .badge-age-recent{background:rgba(234,179,8,.1);color:#eab308}
 .badge-age-aging{background:rgba(249,115,22,.1);color:#f97316}
@@ -1545,7 +1547,7 @@ function renderListV2(tasks){
         </div>
       </div>
       <div class="task-item-actions" onclick="event.stopPropagation()">
-        ${t.jobBagId?`<button class="btn-icon" onclick="openJobBag('${t.jobBagId}')" title="Open Job Bag">${folderIco()}</button>`:''}
+        ${t.jobBagId?`<button class="btn-icon" onclick="openJobBag('${t.jobBagId}','${t.id}')" title="Open Job Bag">${folderIco()}</button>`:''}
         ${t.jobBagId&&(S.user.role==='admin'||t.assignees.includes(S.user.id))?`<button class="btn-icon" onclick="openLogTime('${t.id}','${t.jobBagId}')" title="Log time">${clockIco()}</button>`:''}
         ${canEdit?`<button class="btn-icon" onclick="openEditTask('${t.id}')" title="Edit">${editIco()}</button>`:''}
         ${canEdit?`<button class="btn-icon" onclick="delTask('${t.id}')" title="Delete">${trashIco()}</button>`:''}
@@ -1575,7 +1577,7 @@ function taskCard(t){
       </div>
     </div>
     <div class="task-actions">
-      ${t.jobBagId?`<button class="btn-icon" onclick="openJobBag('${t.jobBagId}')" title="Open Job Bag">${folderIco()}</button>`:''}
+      ${t.jobBagId?`<button class="btn-icon" onclick="openJobBag('${t.jobBagId}','${t.id}')" title="Open Job Bag">${folderIco()}</button>`:''}
       ${t.jobBagId&&(S.user.role==='admin'||t.assignees.includes(S.user.id))?`<button class="btn-icon" onclick="openLogTime('${t.id}','${t.jobBagId}')" title="Log time">${clockIco()}</button>`:''}
       ${canEdit?`<button class="btn-icon" onclick="openEditTask('${t.id}')" title="Edit">${editIco()}</button>`:''}
       ${canEdit?`<button class="btn-icon" onclick="delTask('${t.id}')" title="Delete">${trashIco()}</button>`:''}
@@ -2410,7 +2412,7 @@ function renderTimesheetTab(jbId,tasks,tl){
         const taskVar=taskBillableH-taskLogged;
         const di=dueInfo(t.dueDate);
         const canLog=isMember&&t.assignees.includes(S.user.id)||S.user.role==='admin';
-        return`<tr class="ts-task-row">
+        return`<tr class="ts-task-row" id="jb-task-${t.id}">
           <td style="max-width:240px">
             ${expCell(t.title)}
             <span class="badge badge-priority-${t.priority}" style="font-size:9px;margin-top:4px;display:inline-block">${t.priority}</span>
@@ -2581,7 +2583,20 @@ function fmtDateShort(iso){if(!iso)return'';const d=new Date(iso);return d.toLoc
 function fmtTime(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}
 
 function viewClientJbs(cid){S.clientId=cid;sv('jobbags')}
-async function openJobBag(jbId){S.jbId=jbId;S.jbTab='timesheet';if(_supabaseOk&&!_memChatMsgs[jbId])fetchChatMsgs(jbId);renderMain()}
+async function openJobBag(jbId,taskId){
+  S.jbId=jbId;S.jbTab='timesheet';
+  if(_supabaseOk&&!_memChatMsgs[jbId])fetchChatMsgs(jbId);
+  renderMain();
+  if(taskId){
+    requestAnimationFrame(()=>{
+      const row=document.getElementById('jb-task-'+taskId);
+      if(!row)return;
+      row.scrollIntoView({behavior:'smooth',block:'center'});
+      row.classList.add('task-row-highlight');
+      setTimeout(()=>row.classList.remove('task-row-highlight'),2000);
+    });
+  }
+}
 
 function rteCmd(cmd,val){document.execCommand(cmd,false,val||null);document.getElementById('rte-'+S.jbId)?.focus()}
 
