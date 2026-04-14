@@ -910,7 +910,7 @@ function camelToSnake(obj) {
 }
 
 // ===== SEED DATA =====
-const TODAY = new Date('2026-03-22T12:00:00Z');
+const TODAY = new Date();
 
 function dAgo(n){const d=new Date(TODAY);d.setDate(d.getDate()-n);return d.toISOString()}
 function dFwd(n){const d=new Date(TODAY);d.setDate(d.getDate()+n);return d.toISOString().split('T')[0]}
