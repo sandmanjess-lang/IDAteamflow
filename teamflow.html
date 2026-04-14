@@ -1798,14 +1798,14 @@ function openAddTask(preAssign,preJbId){
         <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="mp"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div>
         <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="ms"><option value="todo" selected>To Do</option><option value="inprogress">In Progress</option><option value="done">Done</option></select></div>
       </div>
-      <div class="form-group"><label class="form-label">Due Date</label>${dpHTML('mdd',dFwd2(7))}</div>
+      <div class="form-group"><label class="form-label">Due Date</label>${dpHTML('mdd',dFwd2(0))}</div>
       ${isAdmin?`<div class="form-group"><label class="form-label">Assign To</label><div class="assignee-grid" id="ag">${members.map(u=>`<div class="assignee-chip ${preSelected.includes(u.id)?'selected':''}" onclick="this.classList.toggle('selected')" data-uid="${u.id}"><div class="user-avatar" style="background:${u.color}22;color:${u.color};border:1.5px solid ${u.color}44;width:22px;height:22px;font-size:9px">${initials(u.name)}</div><div class="assignee-chip-name">${esc(u.name)}</div></div>`).join('')}</div></div>`:''}
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
       <button class="btn btn-primary" style="width:auto" onclick="saveAddTask()">Add Task</button>
     </div>`);
-  dpInit('mdd',dFwd2(7));
+  dpInit('mdd',dFwd2(0));
 }
 
 function toggleReminderMode(){
