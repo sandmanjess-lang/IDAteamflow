@@ -1114,7 +1114,7 @@ function fmtAge(n){if(n===0)return'Today';if(n===1)return'1 day';if(n<7)return n
 function fmtHM(h){if(!h&&h!==0)return'—';const hrs=Math.floor(h);const mins=Math.round((h-hrs)*60);return hrs+':'+(mins<10?'0':'')+mins}
 function fmtVariance(h){if(h===0)return'0:00';const a=Math.abs(h);const hrs=Math.floor(a);const mins=Math.round((a-hrs)*60);return(h>0?'+':'-')+hrs+':'+(mins<10?'0':'')+mins}
 function timeOptions(sel){let o='<option value="">Select time...</option>';for(let i=0.25;i<=20;i+=0.25){const hrs=Math.floor(i);const mins=Math.round((i-hrs)*60);const lbl=hrs+':'+(mins<10?'0':'')+mins;o+=`<option value="${i}"${sel===i?' selected':''}>${lbl}</option>`}return o}
-function taskTimeOptions(sel){let o='<option value="">Not Quoted</option>';for(let i=0.25;i<=20;i+=0.25){const hrs=Math.floor(i);const mins=Math.round((i-hrs)*60);const lbl=hrs+':'+(mins<10?'0':'')+mins;o+=`<option value="${i}"${sel===i?' selected':''}>${lbl}</option>`}return o}
+function taskTimeOptions(sel){let o='<option value="">Not Quoted</option>';for(let i=0.25;i<=50;i+=0.25){const hrs=Math.floor(i);const mins=Math.round((i-hrs)*60);const lbl=hrs+':'+(mins<10?'0':'')+mins;o+=`<option value="${i}"${sel===i?' selected':''}>${lbl}</option>`}return o}
 function cappedTimeOptions(sel,maxH){
   if(!maxH||maxH<=0)return`<option value="0" selected>0:00 — fully allocated</option>`;
   let o='<option value="">Select...</option>';
@@ -3771,7 +3771,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
   }catch(e){console.error('Auto-login check:',e);}
 });
 
-// Realtime subscriptions for chat messages
+// Realtime subscriptions for chat messages, tasks, and notifications
 function setupRealtimeSubscriptions(){
   // Subscribe to new chat messages across all channels
   sb.channel('chat-global').on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages'},payload=>{
@@ -3785,6 +3785,55 @@ function setupRealtimeSubscriptions(){
       _memChatMsgs[jbId].push(mapped);
       // If viewing this chat, re-render
       if(S.view==='teamchat'||(S.jbId===jbId&&S.jbTab==='chat')){renderMain();}
+    }
+  }).subscribe();
+
+  // Subscribe to notifications targeted at the current user
+  sb.channel('notifs-'+S.user.id).on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'target_user_id=eq.'+S.user.id},payload=>{
+    const n=payload.new;
+    if(_seenNotifs.has(n.id))return;
+    _seenNotifs.add(n.id);
+    const body=(n.assigner_name||'Someone')+' assigned you a task'+(n.jb_name?' on '+n.jb_name:'');
+    // In-app toast
+    try{toast(body);}catch(e){}
+    // Browser notification (if permission granted)
+    if('Notification' in window&&Notification.permission==='granted'){
+      try{new Notification(n.task_title||'New task',{body,icon:'/favicon.ico',tag:n.id});}catch(e){}
+    }
+    // Mark as read so we don't re-notify on next login
+    sb.from('notifications').update({read:true}).eq('id',n.id).then(()=>{});
+  }).subscribe();
+
+  // Subscribe to task changes so new/updated assignments appear live
+  sb.channel('tasks-global').on('postgres_changes',{event:'*',schema:'public',table:'tasks'},payload=>{
+    const tasks=getTasks();
+    if(payload.eventType==='INSERT'){
+      const t=snakeToCamel(payload.new);
+      if(!tasks.find(x=>x.id===t.id)){
+        tasks.push(t);
+        _memTasks=tasks;
+        if(S.view==='tasks'||S.view==='mytasks'||S.view==='jobBag')renderMain();
+        renderSidebar();
+      }
+    }else if(payload.eventType==='UPDATE'){
+      const t=snakeToCamel(payload.new);
+      const idx=tasks.findIndex(x=>x.id===t.id);
+      if(idx!==-1){
+        const prevAssignees=tasks[idx].assignees||[];
+        const newAssignees=t.assignees||[];
+        tasks[idx]=t;
+        _memTasks=tasks;
+        // If this user was just newly assigned, we'll also get a notifs INSERT — no extra toast here
+        if(S.view==='tasks'||S.view==='mytasks'||S.view==='jobBag')renderMain();
+        renderSidebar();
+      }
+    }else if(payload.eventType==='DELETE'){
+      const removedId=payload.old&&payload.old.id;
+      if(removedId){
+        _memTasks=tasks.filter(x=>x.id!==removedId);
+        if(S.view==='tasks'||S.view==='mytasks'||S.view==='jobBag')renderMain();
+        renderSidebar();
+      }
     }
   }).subscribe();
 }
