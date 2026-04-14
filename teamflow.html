@@ -2584,9 +2584,9 @@ function fmtTime(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleTi
 
 function viewClientJbs(cid){S.clientId=cid;sv('jobbags')}
 async function openJobBag(jbId,taskId){
-  S.jbId=jbId;S.jbTab='timesheet';
+  S.view='jobbags';S.jbId=jbId;S.jbTab='timesheet';
   if(_supabaseOk&&!_memChatMsgs[jbId])fetchChatMsgs(jbId);
-  renderMain();
+  renderSidebar();renderMain();
   if(taskId){
     requestAnimationFrame(()=>{
       const row=document.getElementById('jb-task-'+taskId);
