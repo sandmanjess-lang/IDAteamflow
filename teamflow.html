@@ -3025,45 +3025,65 @@ async function deleteChatMsg(jbId,msgId){
   const el=document.getElementById('cmsg-'+msgId);
   if(el)el.remove();
 }
+// Find the longest user match starting at an '@' position.
+// Tries 4 → 1 word-long names (and first-word fallback) so "@Steve Gaitskill testing"
+// correctly resolves to user "Steve Gaitskill" and leaves "testing" in the text.
+function findMentionAt(text,atIdx){
+  const users=getUsers();
+  if(!users.length)return null;
+  // Collect up to 4 words after @
+  const rest=text.slice(atIdx+1);
+  const m=rest.match(/^([A-Za-z][A-Za-z0-9'’-]*(?:[ \t]+[A-Za-z][A-Za-z0-9'’-]*){0,3})/);
+  if(!m)return null;
+  const candidate=m[1];
+  const words=candidate.split(/\s+/);
+  // Longest-to-shortest exact match
+  for(let n=words.length;n>=1;n--){
+    const tryName=words.slice(0,n).join(' ').toLowerCase();
+    const u=users.find(x=>(x.name||'').toLowerCase()===tryName);
+    if(u)return{user:u,matched:words.slice(0,n).join(' '),len:words.slice(0,n).join(' ').length};
+  }
+  // First-name fallback (e.g. "@Steve" matches "Steve Gaitskill")
+  const first=words[0].toLowerCase();
+  const u=users.find(x=>(x.name||'').toLowerCase().split(' ')[0]===first);
+  if(u)return{user:u,matched:words[0],len:words[0].length};
+  return null;
+}
+
 // Resolve @mentions in text -> list of user ids whose name matches
 function resolveMentions(text){
   if(!text)return[];
-  const users=getUsers();
   const matched=new Set();
-  // Match @Name — allow up to 3 words, stop at punctuation
-  const re=/@([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*){0,2})/g;
-  let m;
-  while((m=re.exec(text))!==null){
-    const token=m[1].trim().toLowerCase();
-    // Try longest match first: full name, then first two words, then first word
-    const candidates=users.filter(u=>{
-      const n=(u.name||'').toLowerCase();
-      const first=n.split(' ')[0];
-      return n===token||n.startsWith(token+' ')||first===token||token.startsWith(first+' ');
-    });
-    // Prefer exact full-name match
-    const exact=candidates.find(u=>u.name.toLowerCase()===token);
-    const pick=exact||candidates[0];
-    if(pick&&pick.id!==S.user.id)matched.add(pick.id);
+  for(let i=0;i<text.length;i++){
+    if(text[i]!=='@')continue;
+    if(i>0&&!/\s/.test(text[i-1]))continue;// require word boundary before @
+    const r=findMentionAt(text,i);
+    if(r){
+      if(r.user.id!==S.user.id)matched.add(r.user.id);
+      i+=r.len;// skip over matched portion
+    }
   }
   return[...matched];
 }
 
-// Render @mentions as highlighted spans. Highlights "me" if the current user is mentioned.
+// Render @mentions as highlighted spans. Walks the raw text, escapes non-mention
+// chunks, and emits <span class="chat-mention"> for matched users.
 function renderMentions(text){
   if(!text)return'';
-  const users=getUsers();
-  const safe=esc(text);
-  return safe.replace(/@([A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z][A-Za-z0-9]*){0,2})/g,(full,name)=>{
-    const token=name.trim().toLowerCase();
-    const u=users.find(x=>{
-      const n=(x.name||'').toLowerCase();
-      return n===token||n.split(' ')[0]===token||n.startsWith(token+' ');
-    });
-    if(!u)return full;
-    const mine=u.id===S.user.id?' mention-me':'';
-    return`<span class="chat-mention${mine}">@${esc(u.name)}</span>`;
-  });
+  let out='';let cur=0;
+  for(let i=0;i<text.length;i++){
+    if(text[i]!=='@')continue;
+    if(i>0&&!/\s/.test(text[i-1]))continue;
+    const r=findMentionAt(text,i);
+    if(!r)continue;
+    out+=esc(text.slice(cur,i));
+    const mine=r.user.id===S.user.id?' mention-me':'';
+    out+=`<span class="chat-mention${mine}">@${esc(r.user.name)}</span>`;
+    cur=i+1+r.len;
+    i=cur-1;
+  }
+  out+=esc(text.slice(cur));
+  return out;
 }
 
 async function sendChatMsg(jbId){
